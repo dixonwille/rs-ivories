@@ -1,0 +1,20 @@
+[package]
+name = "ivories"
+version = "0.1.0"
+authors = ["Will Dixon <dixonwille@gmail.com>"]
+edition = "2018"
+description = "A package for parsing and rolling dice"
+repository = "https://github.com/dixonwille/rs-ivories"
+readme = "README.md"
+keywords = ["dice", "random", "roll", "parser", "d20"]
+categories = ["simulation", "parser-implementations"]
+license = "MIT"
+
+[badges]
+is-it-maintained-issue-resolution = { repository = "dixonwille/rs-ivories" }
+is-it-maintained-open-issues = { repository = "dixonwille/rs-ivories" }
+maintenance = { status = "actively-developed" }
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
