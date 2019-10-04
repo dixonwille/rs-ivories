@@ -1,6 +1,11 @@
 use super::*;
 
 #[test]
+fn valid_input_single_op() {
+    assert_eq!(parse_expression("-1"), Ok(("", Expression::Constant(-1))));
+}
+
+#[test]
 fn valid_input_space_ops() {
     assert_eq!(
         parse_expression("(1 + 2) * 3"),
@@ -20,7 +25,25 @@ fn valid_input_space_ops() {
 #[test]
 fn valid_input_space_parens() {
     assert_eq!(
-        parse_expression("( 1+2 ) *3"),
+        parse_expression("( 1+2 )*3"),
+        Ok((
+            "",
+            Expression::Multiplication(
+                Box::new(Expression::Addition(
+                    Box::new(Expression::Constant(1)),
+                    Box::new(Expression::Constant(2))
+                )),
+                Box::new(Expression::Constant(3))
+            )
+        ))
+    );
+}
+
+
+#[test]
+fn valid_input_spaces() {
+    assert_eq!(
+        parse_expression("( 1 + 2 ) * 3"),
         Ok((
             "",
             Expression::Multiplication(
@@ -37,7 +60,7 @@ fn valid_input_space_parens() {
 #[test]
 fn valid_input_negation() {
     assert_eq!(
-        parse_expression("-1 + 2 * -3"),
+        parse_expression("-1+2*-3"),
         Ok((
             "",
             Expression::Addition(
