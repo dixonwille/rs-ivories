@@ -1,112 +1,144 @@
-use nom::{
-    branch::alt,
-    character::complete::{char as c, digit1, multispace0},
-    combinator::{cut, map, map_res},
-    multi::many0,
-    sequence::{delimited, pair, preceded},
-    IResult,
-};
+#[cfg(test)]
+use std::fmt;
 
-enum Operation {
-    Multiplication,
-    Division,
-    Addition,
-    Subtraction,
+pub enum Value {
+    Constant(i32, Option<BinaryOp>),
+    Operator(BinaryOp),
 }
 
-fn parse_operation_md(input: &str) -> IResult<&str, Operation> {
-    map(alt((c('*'), c('/'))), |c| {
-        if c == '*' {
-            Operation::Multiplication
-        } else {
-            Operation::Division
+#[cfg(test)]
+impl fmt::Debug for Value {
+    fn fmt(&self, format: &mut fmt::Formatter) -> fmt::Result {
+        use self::Value::*;
+        match *self {
+            Constant(ref val, ref next) => {
+                let mut n = String::new();
+                if let Some(op) = next {
+                    n = format!("{:?}", op);
+                }
+                write!(format, "{}{}", val, n)
+            }
+            Operator(ref op) => write!(format, "{:?}", op),
         }
-    })(input)
+    }
 }
 
-fn parse_operation_as(input: &str) -> IResult<&str, Operation> {
-    map(alt((c('+'), c('-'))), |c| {
-        if c == '+' {
-            Operation::Addition
-        } else {
-            Operation::Subtraction
+pub enum BinaryOp {
+    Or(Box<Conditional>),
+    And(Box<Conditional>),
+}
+
+#[cfg(test)]
+impl fmt::Debug for BinaryOp {
+    fn fmt(&self, format: &mut fmt::Formatter) -> fmt::Result {
+        use self::BinaryOp::*;
+        match *self {
+            Or(ref cond) => write!(format, "|{:?}", cond),
+            And(ref cond) => write!(format, "&{:?}", cond),
         }
-    })(input)
+    }
+}
+
+pub enum Conditional {
+    LessThan(Value),
+    GreaterThan(Value),
+    EqualTo(Value),
+}
+
+#[cfg(test)]
+impl fmt::Debug for Conditional {
+    fn fmt(&self, format: &mut fmt::Formatter) -> fmt::Result {
+        use self::Conditional::*;
+        match *self {
+            LessThan(ref val) => write!(format, "<{:?}", val),
+            GreaterThan(ref val) => write!(format, ">{:?}", val),
+            EqualTo(ref val) => write!(format, "={:?}", val),
+        }
+    }
+}
+
+pub enum PoolModifier {
+    DropHighest(i32),
+    DropLowest(i32),
+    Drop(Conditional),
+    CapClamp(Conditional),
+    Replace(i32, i32),
+    NoRepeats,
+    ReRoll(Conditional, i32),
+    NotSettle(Conditional),
+    Explode(Conditional, i32),
+    LimitedExplode(Conditional, i32),
+    PatternExplode(Vec<i32>),
+    Count(Conditional),
+}
+
+#[cfg(test)]
+impl fmt::Debug for PoolModifier {
+    fn fmt(&self, format: &mut fmt::Formatter) -> fmt::Result {
+        use self::PoolModifier::*;
+        match *self {
+            DropHighest(ref count) => write!(format, "(DH{})", count),
+            DropLowest(ref count) => write!(format, "(DL{})", count),
+            Drop(ref cond) => write!(format, "(D{:?})", cond),
+            CapClamp(ref cond) => write!(format, "(C{:?})", cond),
+            Replace(ref old, ref new) => write!(format, "({}->{})", old, new),
+            NoRepeats => write!(format, "(NR)"),
+            ReRoll(ref cond, ref count) => write!(format, "(R{:?}:{})", cond, count),
+            NotSettle(ref cond) => write!(format, "(R{:?})", cond),
+            Explode(ref cond, ref count) => write!(format, "(E{:?}:{})", cond, count),
+            LimitedExplode(ref cond, ref count) => write!(format, "(LE{:?}:{})", cond, count),
+            PatternExplode(ref patt) => write!(format, "(PE{:?})", patt),
+            Count(ref cond) => write!(format, "(#{:?})", cond),
+        }
+    }
+}
+
+pub struct DicePool {
+    pub count: i32,
+    pub sides: i32,
+    pub modifiers: Vec<PoolModifier>,
+}
+
+#[cfg(test)]
+impl fmt::Debug for DicePool {
+    fn fmt(&self, format: &mut fmt::Formatter) -> fmt::Result {
+        let mut modifiers = String::new();
+        for modif in &self.modifiers {
+            modifiers += &format!("{:?}", modif);
+        }
+        write!(format, "({}d{}[{}])", self.count, self.sides, modifiers)
+    }
+}
+
+impl DicePool {
+    pub fn new(count: i32, sides: i32) -> Self {
+        DicePool {
+            count: count,
+            sides: sides,
+            modifiers: vec![],
+        }
+    }
+    pub fn append_modifier(&mut self, modifier: PoolModifier) {
+        self.modifiers.push(modifier);
+    }
 }
 
 pub enum Expression {
     Constant(i32),
+    Pool(DicePool),
     Multiplication(Box<Expression>, Box<Expression>),
     Division(Box<Expression>, Box<Expression>),
     Addition(Box<Expression>, Box<Expression>),
     Subtraction(Box<Expression>, Box<Expression>),
 }
 
-fn parse_constant(input: &str) -> IResult<&str, i32> {
-    delimited(
-        multispace0,
-        alt((
-            map_res(digit1, |s: &str| s.parse::<i32>()),
-            map(preceded(c('-'), digit1), |s: &str| {
-                -1 * s.parse::<i32>().unwrap()
-            }),
-        )),
-        multispace0,
-    )(input)
-}
-
-fn parse_parens(input: &str) -> IResult<&str, Expression> {
-    delimited(
-        multispace0,
-        delimited(c('('), parse_expression, c(')')),
-        multispace0,
-    )(input)
-}
-
-// Any Expression parser in here should account for space on either side of it
-fn parse_factor(input: &str) -> IResult<&str, Expression> {
-    alt((map(parse_constant, Expression::Constant), parse_parens))(input)
-}
-
-fn fold(acc: Expression, (op, val): (Operation, Expression)) -> Expression {
-    match op {
-        Operation::Multiplication => Expression::Multiplication(Box::new(acc), Box::new(val)),
-        Operation::Division => Expression::Division(Box::new(acc), Box::new(val)),
-        Operation::Addition => Expression::Addition(Box::new(acc), Box::new(val)),
-        Operation::Subtraction => Expression::Subtraction(Box::new(acc), Box::new(val)),
-    }
-}
-
-fn parse_term(input: &str) -> IResult<&str, Expression> {
-    let (i, mut init) = parse_factor(input)?;
-    let (i, rights) = many0(alt((
-        pair(parse_operation_md, cut(parse_factor)),
-        map(parse_parens, |e| (Operation::Multiplication, e)),
-    )))(i)?;
-    for right in rights {
-        init = fold(init, right);
-    }
-    Ok((i, init))
-}
-
-pub fn parse_expression(input: &str) -> IResult<&str, Expression> {
-    let (i, mut init) = parse_term(input)?;
-    let (i, rights) = many0(pair(parse_operation_as, parse_term))(i)?;
-    for right in rights {
-        init = fold(init, right)
-    }
-    Ok((i, init))
-}
-
-#[cfg(test)]
-use std::fmt;
-
 #[cfg(test)]
 impl fmt::Debug for Expression {
     fn fmt(&self, format: &mut fmt::Formatter) -> fmt::Result {
         use self::Expression::*;
         match *self {
-            Constant(val) => write!(format, "{}", val),
+            Constant(ref val) => write!(format, "{}", val),
+            Pool(ref dice) => write!(format, "{:?}", dice),
             Multiplication(ref left, ref right) => write!(format, "({:?} * {:?})", left, right),
             Division(ref left, ref right) => write!(format, "({:?} / {:?})", left, right),
             Addition(ref left, ref right) => write!(format, "({:?} + {:?})", left, right),
@@ -115,114 +147,8 @@ impl fmt::Debug for Expression {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    macro_rules! exhaust_valid {
-        ($name:expr, $input:expr, $exp:expr) => {
-            assert_eq!(
-                $input.map(|(i, x)| (i, format!("{:?}", x))),
-                Ok(("", String::from($exp))),
-                "{} failed",
-                $name
-            );
-        };
-    }
-
-    #[test]
-    fn order_of_operations() {
-        exhaust_valid!(
-            "multiply before add",
-            parse_expression("1+2*3"),
-            "(1 + (2 * 3))"
-        );
-        exhaust_valid!(
-            "divide before add",
-            parse_expression("1+2/3"),
-            "(1 + (2 / 3))"
-        );
-        exhaust_valid!(
-            "multiply before subtract",
-            parse_expression("1-2*3"),
-            "(1 - (2 * 3))"
-        );
-        exhaust_valid!(
-            "divide before subtract",
-            parse_expression("1-2/3"),
-            "(1 - (2 / 3))"
-        );
-        exhaust_valid!(
-            "parenthesis before multiply",
-            parse_expression("(1+2)*3"),
-            "((1 + 2) * 3)"
-        );
-        exhaust_valid!(
-            "parenthesis before divide",
-            parse_expression("(1+2)/3"),
-            "((1 + 2) / 3)"
-        );
-        exhaust_valid!(
-            "left to right multiply and divide",
-            parse_expression("1*2/3"),
-            "((1 * 2) / 3)"
-        );
-        exhaust_valid!(
-            "left to right add and subtract",
-            parse_expression("1+2-3"),
-            "((1 + 2) - 3)"
-        );
-        exhaust_valid!(
-            "random order 1",
-            parse_expression("(1+2)/3-4"),
-            "(((1 + 2) / 3) - 4)"
-        );
-        exhaust_valid!(
-            "random order 2",
-            parse_expression("1/(2+3)*4-5"),
-            "(((1 / (2 + 3)) * 4) - 5)"
-        );
-        exhaust_valid!(
-            "random order 3",
-            parse_expression("1+2-3*4/5"),
-            "((1 + 2) - ((3 * 4) / 5))"
-        );
-    }
-
-    #[test]
-    fn spacing() {
-        exhaust_valid!(
-            "around operators",
-            parse_expression("(1  +  2) *  3  "),
-            "((1 + 2) * 3)"
-        );
-        exhaust_valid!(
-            "around parenthesis",
-            parse_expression("  (  1+2 )  *3"),
-            "((1 + 2) * 3)"
-        );
-        exhaust_valid!(
-            "random",
-            parse_expression(" (  1 +   2)*  3 "),
-            "((1 + 2) * 3)"
-        );
-    }
-
-    #[test]
-    fn constants() {
-        exhaust_valid!("single negative constant", parse_expression("-3"), "-3");
-        exhaust_valid!(
-            "negative constants",
-            parse_expression("-1+2*-3"),
-            "(-1 + (2 * -3))"
-        );
-    }
-    #[test]
-    fn parens_as_mult() {
-        exhaust_valid!(
-            "parenthesis as multiply",
-            parse_expression("3(1+2)"),
-            "(3 * (1 + 2))"
-        );
+impl Expression {
+    pub fn evaluate(self) -> Result<i32, &'static str> {
+        Ok(0)
     }
 }
