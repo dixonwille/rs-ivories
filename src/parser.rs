@@ -1,8 +1,9 @@
 use nom::{
     branch::alt,
+    bytes::complete::{tag},
     character::complete::{char as c, digit1, multispace0},
     combinator::{cut, map, map_res, opt},
-    multi::{many0, many1},
+    multi::{many0, many1, separated_nonempty_list},
     sequence::{delimited, pair, preceded, separated_pair},
     IResult,
 };
@@ -59,18 +60,17 @@ fn parse_parens(input: &str) -> IResult<&str, Expression> {
 fn parse_conditional(input: &str) -> IResult<&str, Conditional> {
     alt((
         map(
-            preceded(pair(c('<'), c('=')), parse_limited_factor),
+            preceded(tag("<="), parse_limited_factor), //TAG
             Conditional::LessThanOrEqualTo,
         ),
         map(
-            preceded(pair(c('>'), c('=')), parse_limited_factor),
+            preceded(tag(">="), parse_limited_factor),
             Conditional::GreaterThanOrEqualTo,
         ),
         map(
-            preceded(pair(c('!'), c('=')), parse_limited_factor),
+            preceded(tag("!="), parse_limited_factor),
             Conditional::NotEqualTo,
         ),
-        map(preceded(c('='), parse_limited_factor), Conditional::EqualTo),
         map(
             preceded(c('>'), parse_limited_factor),
             Conditional::GreaterThan,
@@ -79,6 +79,10 @@ fn parse_conditional(input: &str) -> IResult<&str, Conditional> {
             preceded(c('<'), parse_limited_factor),
             Conditional::LessThan,
         ),
+        map(
+            preceded(opt(c('=')), parse_limited_factor),
+            Conditional::EqualTo,
+        )
     ))(input)
 }
 
@@ -87,6 +91,7 @@ fn parse_conditional(input: &str) -> IResult<&str, Conditional> {
     L# - Drop the Lowest
     D[C] - Drop based on Conditions
     C[C] - Cap or Clamp based on Conditions
+    R[(C,E)] - Replace conditional with expression
     U - Reroll dice until all values are unique
 */
 fn parse_pool_modifier(input: &str) -> IResult<&str, PoolModifier> {
@@ -106,6 +111,16 @@ fn parse_pool_modifier(input: &str) -> IResult<&str, PoolModifier> {
         map(
             preceded(alt((c('C'), c('c'))), many1(parse_conditional)),
             PoolModifier::CapClamp,
+        ),
+        map(
+            preceded(
+                alt((c('R'), c('r'))),
+                separated_nonempty_list(
+                    c(','),
+                    separated_pair(parse_conditional, c('='), parse_limited_factor),
+                ),
+            ),
+            PoolModifier::Replace,
         ),
         map(alt((c('U'), c('u'))), |_| PoolModifier::NoRepeats),
     ))(input)
@@ -364,6 +379,21 @@ mod tests {
             "multiple conditions",
             parse_expression("5d10D<=2C>=7"),
             "(5d10[(D[<=2])(C[>=7])])"
+        );
+        exhaust_valid!(
+            "conditional with equals",
+            parse_expression("5d10D=2"),
+            "(5d10[(D[=2])])"
+        );
+        exhaust_valid!(
+            "conditional with equals",
+            parse_expression("5d10D2"),
+            "(5d10[(D[=2])])"
+        );
+        exhaust_valid!(
+            "replace",
+            parse_expression("5d10R5=2,>7=2"),
+            "(5d10[(R[(=5, 2), (>7, 2)])])"
         );
     }
 }
