@@ -26,18 +26,17 @@ impl fmt::Debug for Conditional {
 }
 
 pub enum PoolModifier {
-    DropHighest(i32),           // Count
-    DropLowest(i32),            // Count
-    Drop(Vec<Conditional>),     // What counts to drop
-    CapClamp(Vec<Conditional>), // What is capped and clamped
-    Replace(i32, i32),
-    NoRepeats,
-    ReRoll(Conditional, i32),
-    NotSettle(Conditional),
-    Explode(Conditional, i32),
-    LimitedExplode(Conditional, i32),
-    PatternExplode(Vec<i32>),
-    Count(Conditional),
+    DropHighest(i32),                         // Drop the highest count
+    DropLowest(i32),                          // Drop the lowest count
+    Drop(Vec<Conditional>),                   // What dice to drop based on conditionals
+    CapClamp(Vec<Conditional>),               // What is capped and clamped based on conditionals
+    Replace(Vec<(Conditional, Expression)>), // List of conditionals and expressions to replace the dice with
+    NoRepeats,                               // Only allow unique dice rolls (re roll other dice)
+    NotSettle(Vec<Conditional>, Option<i32>), // Conditionals and the max number of re rolls (optional where none means to run forever)
+    Explode(Option<Vec<Conditional>>), // Optional Conditionals (None means use max value in pool)
+    LimitedExplode(Option<Vec<Conditional>>), // Optional Conditionals (None means use max value in pool)
+    PatternExplode(Vec<i32>),                 // Number pattern that if seen, will be exploded
+    Count(Option<Vec<Conditional>>), // Optional Conditionals (None means use max value in pool)
 }
 
 #[cfg(test)]
@@ -49,12 +48,20 @@ impl fmt::Debug for PoolModifier {
             DropLowest(ref count) => write!(format, "(DL{})", count),
             Drop(ref cond) => write!(format, "(D{:?})", cond),
             CapClamp(ref cond) => write!(format, "(C{:?})", cond),
-            Replace(ref old, ref new) => write!(format, "({}->{})", old, new),
+            Replace(ref cond) => write!(format, "(R{:?})", cond),
             NoRepeats => write!(format, "(NR)"),
-            ReRoll(ref cond, ref count) => write!(format, "(R{:?}:{})", cond, count),
-            NotSettle(ref cond) => write!(format, "(R{:?})", cond),
-            Explode(ref cond, ref count) => write!(format, "(E{:?}:{})", cond, count),
-            LimitedExplode(ref cond, ref count) => write!(format, "(LE{:?}:{})", cond, count),
+            NotSettle(ref cond, ref max) => match max {
+                Some(m) => write!(format, "(R{:?}:{})", cond, m),
+                None => write!(format, "(R{:?})", cond),
+            },
+            Explode(ref cond) => match cond {
+                Some(v) => write!(format, "(E{:?})", v),
+                None => write!(format, "(E)"),
+            },
+            LimitedExplode(ref cond) => match cond {
+                Some(v) => write!(format, "(LE{:?})", v),
+                None => write!(format, "(LE)"),
+            },
             PatternExplode(ref patt) => write!(format, "(PE{:?})", patt),
             Count(ref cond) => write!(format, "(#{:?})", cond),
         }
@@ -90,7 +97,7 @@ impl DicePool {
         self.modifiers.push(modifier);
     }
 
-    pub fn append_modifiers(&mut self, modifiers: &mut Vec<PoolModifier>){
+    pub fn append_modifiers(&mut self, modifiers: &mut Vec<PoolModifier>) {
         self.modifiers.append(modifiers);
     }
 }

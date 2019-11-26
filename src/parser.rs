@@ -87,19 +87,27 @@ fn parse_conditional(input: &str) -> IResult<&str, Conditional> {
     L# - Drop the Lowest
     D[C] - Drop based on Conditions
     C[C] - Cap or Clamp based on Conditions
+    U - Reroll dice until all values are unique
 */
 fn parse_pool_modifier(input: &str) -> IResult<&str, PoolModifier> {
     alt((
-        map(preceded(c('H'), parse_digits), PoolModifier::DropHighest),
-        map(preceded(c('L'), parse_digits), PoolModifier::DropLowest),
         map(
-            preceded(c('D'), many1(parse_conditional)),
+            preceded(alt((c('H'), c('h'))), parse_digits),
+            PoolModifier::DropHighest,
+        ),
+        map(
+            preceded(alt((c('L'), c('l'))), parse_digits),
+            PoolModifier::DropLowest,
+        ),
+        map(
+            preceded(alt((c('D'), c('d'))), many1(parse_conditional)),
             PoolModifier::Drop,
         ),
         map(
-            preceded(c('C'), many1(parse_conditional)),
+            preceded(alt((c('C'), c('c'))), many1(parse_conditional)),
             PoolModifier::CapClamp,
         ),
+        map(alt((c('U'), c('u'))), |_| PoolModifier::NoRepeats),
     ))(input)
 }
 
@@ -346,6 +354,7 @@ mod tests {
             parse_expression("5d10C<=2"),
             "(5d10[(C[<=2])])"
         );
+        exhaust_valid!("no repeats", parse_expression("5d10U"), "(5d10[(NR)])");
         exhaust_valid!(
             "cap or clamp multiple conditional",
             parse_expression("5d10C<=2>7"),
