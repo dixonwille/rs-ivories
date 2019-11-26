@@ -2,8 +2,8 @@ use nom::{
     branch::alt,
     character::complete::{char as c, digit1, multispace0},
     combinator::{cut, map, map_res, opt},
-    multi::many0,
-    sequence::{delimited, pair, preceded, terminated},
+    multi::{many0, many1},
+    sequence::{delimited, pair, preceded, separated_pair},
     IResult,
 };
 
@@ -16,6 +16,12 @@ enum Operation {
     Subtraction,
 }
 
+// Parse a number
+fn parse_digits(input: &str) -> IResult<&str, i32> {
+    map_res(digit1, |s: &str| s.parse::<i32>())(input)
+}
+
+// Parses * or / and returns appropriate Operation
 fn parse_operation_md(input: &str) -> IResult<&str, Operation> {
     map(alt((c('*'), c('/'))), |c| {
         if c == '*' {
@@ -26,6 +32,7 @@ fn parse_operation_md(input: &str) -> IResult<&str, Operation> {
     })(input)
 }
 
+// Parses + or - and returns appropriate Operation
 fn parse_operation_as(input: &str) -> IResult<&str, Operation> {
     map(alt((c('+'), c('-'))), |c| {
         if c == '+' {
@@ -36,50 +43,95 @@ fn parse_operation_as(input: &str) -> IResult<&str, Operation> {
     })(input)
 }
 
+// Parses a string into an i32. It also looks for negative numbers and adjusts accordingly
 fn parse_constant(input: &str) -> IResult<&str, i32> {
-    delimited(
-        multispace0,
-        alt((
-            map_res(digit1, |s: &str| s.parse::<i32>()),
-            map(
-                preceded(c('-'), map_res(digit1, |s: &str| s.parse::<i32>())),
-                |i: i32| -1 * i,
-            ),
-        )),
-        multispace0,
-    )(input)
+    alt((
+        parse_digits,
+        map(preceded(c('-'), parse_digits), |i: i32| -1 * i),
+    ))(input)
 }
 
+// Parses the parenthesis with an Expression in the middle
 fn parse_parens(input: &str) -> IResult<&str, Expression> {
-    delimited(
-        multispace0,
-        delimited(c('('), parse_expression, c(')')),
-        multispace0,
-    )(input)
+    delimited(c('('), parse_expression, c(')'))(input)
 }
 
-fn parse_dice_pool(input: &str) -> IResult<&str, Expression> {
-    let (i, dice) = delimited(
-        multispace0,
-        pair(
-            terminated(opt(map_res(digit1, |s: &str| s.parse::<i32>())), c('d')),
-            map_res(digit1, |s: &str| s.parse::<i32>()),
+fn parse_conditional(input: &str) -> IResult<&str, Conditional> {
+    alt((
+        map(
+            preceded(pair(c('<'), c('=')), parse_limited_factor),
+            Conditional::LessThanOrEqualTo,
         ),
-        multispace0,
+        map(
+            preceded(pair(c('>'), c('=')), parse_limited_factor),
+            Conditional::GreaterThanOrEqualTo,
+        ),
+        map(
+            preceded(pair(c('!'), c('=')), parse_limited_factor),
+            Conditional::NotEqualTo,
+        ),
+        map(preceded(c('='), parse_limited_factor), Conditional::EqualTo),
+        map(
+            preceded(c('>'), parse_limited_factor),
+            Conditional::GreaterThan,
+        ),
+        map(
+            preceded(c('<'), parse_limited_factor),
+            Conditional::LessThan,
+        ),
+    ))(input)
+}
+
+/* Parse the pool modifiers
+    H# - Drop the Highest
+    L# - Drop the Lowest
+    D[C] - Drop based on Conditions
+    C[C] - Cap or Clamp based on Conditions
+*/
+fn parse_pool_modifier(input: &str) -> IResult<&str, PoolModifier> {
+    alt((
+        map(preceded(c('H'), parse_digits), PoolModifier::DropHighest),
+        map(preceded(c('L'), parse_digits), PoolModifier::DropLowest),
+        map(
+            preceded(c('D'), many1(parse_conditional)),
+            PoolModifier::Drop,
+        ),
+        map(
+            preceded(c('C'), many1(parse_conditional)),
+            PoolModifier::CapClamp,
+        ),
+    ))(input)
+}
+
+// Parses the #d# along with all the modifiers for the pool
+fn parse_dice_pool(input: &str) -> IResult<&str, Expression> {
+    let (i, mut dice) = pair(
+        separated_pair(opt(parse_digits), c('d'), parse_digits),
+        many0(parse_pool_modifier),
     )(input)?;
-    let count = match dice.0 {
+    let count = match (dice.0).0 {
         Some(i) => i,
         None => 1,
     };
-    Ok((i, Expression::Pool(DicePool::new(count, dice.1))))
+    let mut pool = DicePool::new(count, (dice.0).1);
+    pool.append_modifiers(&mut dice.1);
+    Ok((i, Expression::Pool(pool)))
+}
+
+// Don't allow DicePool as it should be in parens and no spacing around it
+fn parse_limited_factor(input: &str) -> IResult<&str, Expression> {
+    alt((map(parse_constant, Expression::Constant), parse_parens))(input)
 }
 
 // Any Expression parser in here should account for space on either side of it
 fn parse_factor(input: &str) -> IResult<&str, Expression> {
     alt((
-        parse_dice_pool,
-        map(parse_constant, Expression::Constant),
-        parse_parens,
+        delimited(multispace0, parse_dice_pool, multispace0),
+        map(
+            delimited(multispace0, parse_constant, multispace0),
+            Expression::Constant,
+        ),
+        delimited(multispace0, parse_parens, multispace0),
     ))(input)
 }
 
@@ -256,6 +308,53 @@ mod tests {
             "dice with arithmatic",
             parse_expression("2d10 + 7"),
             "((2d10[]) + 7)"
+        );
+        exhaust_valid!(
+            "dice with arithmatic",
+            parse_expression("2d10D<2 + 7"),
+            "((2d10[(D[<2])]) + 7)"
+        );
+        exhaust_valid!(
+            "dice with arithmatic in condtional",
+            parse_expression("2d10D<(2 + 7)"),
+            "(2d10[(D[<(2 + 7)])])"
+        );
+        exhaust_valid!(
+            "dice with dice in condtional",
+            parse_expression("2d10D<(2d10)"),
+            "(2d10[(D[<(2d10[])])])"
+        );
+        exhaust_valid!("drop highest", parse_expression("5d10H2"), "(5d10[(DH2)])");
+        exhaust_valid!("drop lowest", parse_expression("5d10L2"), "(5d10[(DL2)])");
+        exhaust_valid!(
+            "drop single conditional",
+            parse_expression("5d10D<=2"),
+            "(5d10[(D[<=2])])"
+        );
+        exhaust_valid!(
+            "drop single conditional",
+            parse_expression("5d10D<=2"),
+            "(5d10[(D[<=2])])"
+        );
+        exhaust_valid!(
+            "drop multiple conditional",
+            parse_expression("5d10D<=2>7"),
+            "(5d10[(D[<=2, >7])])"
+        );
+        exhaust_valid!(
+            "cap or clamp single conditional",
+            parse_expression("5d10C<=2"),
+            "(5d10[(C[<=2])])"
+        );
+        exhaust_valid!(
+            "cap or clamp multiple conditional",
+            parse_expression("5d10C<=2>7"),
+            "(5d10[(C[<=2, >7])])"
+        );
+        exhaust_valid!(
+            "multiple conditions",
+            parse_expression("5d10D<=2C>=7"),
+            "(5d10[(D[<=2])(C[>=7])])"
         );
     }
 }

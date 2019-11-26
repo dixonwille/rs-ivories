@@ -1,48 +1,13 @@
 #[cfg(test)]
 use std::fmt;
 
-pub enum Value {
-    Constant(i32, Option<BinaryOp>),
-    Operator(BinaryOp),
-}
-
-#[cfg(test)]
-impl fmt::Debug for Value {
-    fn fmt(&self, format: &mut fmt::Formatter) -> fmt::Result {
-        use self::Value::*;
-        match *self {
-            Constant(ref val, ref next) => {
-                let mut n = String::new();
-                if let Some(op) = next {
-                    n = format!("{:?}", op);
-                }
-                write!(format, "{}{}", val, n)
-            }
-            Operator(ref op) => write!(format, "{:?}", op),
-        }
-    }
-}
-
-pub enum BinaryOp {
-    Or(Box<Conditional>),
-    And(Box<Conditional>),
-}
-
-#[cfg(test)]
-impl fmt::Debug for BinaryOp {
-    fn fmt(&self, format: &mut fmt::Formatter) -> fmt::Result {
-        use self::BinaryOp::*;
-        match *self {
-            Or(ref cond) => write!(format, "|{:?}", cond),
-            And(ref cond) => write!(format, "&{:?}", cond),
-        }
-    }
-}
-
 pub enum Conditional {
-    LessThan(Value),
-    GreaterThan(Value),
-    EqualTo(Value),
+    LessThan(Expression),
+    LessThanOrEqualTo(Expression),
+    GreaterThan(Expression),
+    GreaterThanOrEqualTo(Expression),
+    EqualTo(Expression),
+    NotEqualTo(Expression),
 }
 
 #[cfg(test)]
@@ -51,17 +16,20 @@ impl fmt::Debug for Conditional {
         use self::Conditional::*;
         match *self {
             LessThan(ref val) => write!(format, "<{:?}", val),
+            LessThanOrEqualTo(ref val) => write!(format, "<={:?}", val),
             GreaterThan(ref val) => write!(format, ">{:?}", val),
+            GreaterThanOrEqualTo(ref val) => write!(format, ">={:?}", val),
             EqualTo(ref val) => write!(format, "={:?}", val),
+            NotEqualTo(ref val) => write!(format, "!={:?}", val),
         }
     }
 }
 
 pub enum PoolModifier {
-    DropHighest(i32),
-    DropLowest(i32),
-    Drop(Conditional),
-    CapClamp(Conditional),
+    DropHighest(i32),           // Count
+    DropLowest(i32),            // Count
+    Drop(Vec<Conditional>),     // What counts to drop
+    CapClamp(Vec<Conditional>), // What is capped and clamped
     Replace(i32, i32),
     NoRepeats,
     ReRoll(Conditional, i32),
@@ -120,6 +88,10 @@ impl DicePool {
     }
     pub fn append_modifier(&mut self, modifier: PoolModifier) {
         self.modifiers.push(modifier);
+    }
+
+    pub fn append_modifiers(&mut self, modifiers: &mut Vec<PoolModifier>){
+        self.modifiers.append(modifiers);
     }
 }
 
