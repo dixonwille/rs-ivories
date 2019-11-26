@@ -1,9 +1,9 @@
 use nom::{
     branch::alt,
     character::complete::{char as c, digit1, multispace0},
-    combinator::{cut, map, map_res},
+    combinator::{cut, map, map_res, opt},
     multi::many0,
-    sequence::{delimited, pair, preceded},
+    sequence::{delimited, pair, preceded, terminated},
     IResult,
 };
 
@@ -41,9 +41,10 @@ fn parse_constant(input: &str) -> IResult<&str, i32> {
         multispace0,
         alt((
             map_res(digit1, |s: &str| s.parse::<i32>()),
-            map(preceded(c('-'), digit1), |s: &str| {
-                -1 * s.parse::<i32>().unwrap()
-            }),
+            map(
+                preceded(c('-'), map_res(digit1, |s: &str| s.parse::<i32>())),
+                |i: i32| -1 * i,
+            ),
         )),
         multispace0,
     )(input)
@@ -57,9 +58,29 @@ fn parse_parens(input: &str) -> IResult<&str, Expression> {
     )(input)
 }
 
+fn parse_dice_pool(input: &str) -> IResult<&str, Expression> {
+    let (i, dice) = delimited(
+        multispace0,
+        pair(
+            terminated(opt(map_res(digit1, |s: &str| s.parse::<i32>())), c('d')),
+            map_res(digit1, |s: &str| s.parse::<i32>()),
+        ),
+        multispace0,
+    )(input)?;
+    let count = match dice.0 {
+        Some(i) => i,
+        None => 1,
+    };
+    Ok((i, Expression::Pool(DicePool::new(count, dice.1))))
+}
+
 // Any Expression parser in here should account for space on either side of it
 fn parse_factor(input: &str) -> IResult<&str, Expression> {
-    alt((map(parse_constant, Expression::Constant), parse_parens))(input)
+    alt((
+        parse_dice_pool,
+        map(parse_constant, Expression::Constant),
+        parse_parens,
+    ))(input)
 }
 
 fn fold(acc: Expression, (op, val): (Operation, Expression)) -> Expression {
@@ -76,6 +97,7 @@ fn parse_term(input: &str) -> IResult<&str, Expression> {
     let (i, rights) = many0(alt((
         pair(parse_operation_md, cut(parse_factor)),
         map(parse_parens, |e| (Operation::Multiplication, e)),
+        map(parse_dice_pool, |e| (Operation::Multiplication, e)),
     )))(i)?;
     for right in rights {
         init = fold(init, right);
@@ -150,6 +172,16 @@ mod tests {
             "((1 + 2) - 3)"
         );
         exhaust_valid!(
+            "dice treated as constant on right",
+            parse_expression("(1+3)3d10"),
+            "((1 + 3) * (3d10[]))"
+        );
+        exhaust_valid!(
+            "dice treated as constant on left",
+            parse_expression("3d10(1+3)"),
+            "((3d10[]) * (1 + 3))"
+        );
+        exhaust_valid!(
             "random order 1",
             parse_expression("(1+2)/3-4"),
             "(((1 + 2) / 3) - 4)"
@@ -183,6 +215,11 @@ mod tests {
             parse_expression(" (  1 +   2)*  3 "),
             "((1 + 2) * 3)"
         );
+        exhaust_valid!(
+            "around dice",
+            parse_expression("1+  2d10  +3"),
+            "((1 + (2d10[])) + 3)"
+        )
     }
 
     #[test]
@@ -200,6 +237,25 @@ mod tests {
             "parenthesis as multiply",
             parse_expression("3(1+2)"),
             "(3 * (1 + 2))"
+        );
+    }
+
+    #[test]
+    fn dice_pool() {
+        exhaust_valid!(
+            "simple dice without count",
+            parse_expression("d20"),
+            "(1d20[])"
+        );
+        exhaust_valid!(
+            "simple dice with count",
+            parse_expression("5d20"),
+            "(5d20[])"
+        );
+        exhaust_valid!(
+            "dice with arithmatic",
+            parse_expression("2d10 + 7"),
+            "((2d10[]) + 7)"
         );
     }
 }
