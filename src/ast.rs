@@ -104,6 +104,7 @@ impl DicePool {
             modifiers: vec![],
         }
     }
+
     pub fn append_modifier(&mut self, modifier: PoolModifier) {
         self.modifiers.push(modifier);
     }
@@ -139,6 +140,92 @@ impl fmt::Debug for Expression {
 
 impl Expression {
     pub fn evaluate(self) -> Result<i32, &'static str> {
-        Ok(0)
+        match self {
+            Expression::Constant(i) => Ok(i),
+            Expression::Multiplication(left, right) => {
+                let (l, r) = evaluate_lr(left, right)?;
+                Ok(l * r)
+            }
+            Expression::Division(left, right) => {
+                let (l, r) = evaluate_lr(left, right)?;
+                Ok(l / r)
+            }
+            Expression::Addition(left, right) => {
+                let (l, r) = evaluate_lr(left, right)?;
+                Ok(l + r)
+            }
+            Expression::Subtraction(left, right) => {
+                let (l, r) = evaluate_lr(left, right)?;
+                Ok(l - r)
+            }
+            _ => Err("Not Implimented"),
+        }
+    }
+}
+
+fn evaluate_lr(left: Box<Expression>, right: Box<Expression>) -> Result<(i32, i32), &'static str> {
+    let l = left.evaluate()?;
+    let r = right.evaluate()?;
+    Ok((l, r))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    macro_rules! valid_evaluate {
+        ($name:expr, $input:expr, $exp:expr) => {
+            assert_eq!($input.evaluate(), Ok($exp), "{} failed", $name);
+        };
+    }
+
+    #[test]
+    fn arithmatic() {
+        valid_evaluate!(
+            "Addition",
+            Expression::Addition(
+                Box::new(Expression::Constant(10)),
+                Box::new(Expression::Constant(11))
+            ),
+            21
+        );
+        valid_evaluate!(
+            "Subtraction",
+            Expression::Subtraction(
+                Box::new(Expression::Constant(10)),
+                Box::new(Expression::Constant(11))
+            ),
+            -1
+        );
+        valid_evaluate!(
+            "Multiplication",
+            Expression::Multiplication(
+                Box::new(Expression::Constant(10)),
+                Box::new(Expression::Constant(11))
+            ),
+            110
+        );
+        valid_evaluate!(
+            "Division",
+            Expression::Division(
+                Box::new(Expression::Constant(10)),
+                Box::new(Expression::Constant(11))
+            ),
+            0
+        );
+        valid_evaluate!(
+            "Multiple Levels",
+            Expression::Addition(
+                Box::new(Expression::Multiplication(
+                    Box::new(Expression::Constant(10)),
+                    Box::new(Expression::Constant(11))
+                )),
+                Box::new(Expression::Multiplication(
+                    Box::new(Expression::Constant(10)),
+                    Box::new(Expression::Constant(11))
+                ))
+            ),
+            220
+        );
     }
 }
