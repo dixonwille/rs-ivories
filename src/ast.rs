@@ -26,16 +26,15 @@ impl fmt::Debug for Conditional {
 }
 
 pub enum PoolModifier {
-    DropHighest(i32),                         // Drop the highest count
-    DropLowest(i32),                          // Drop the lowest count
+    DropHighest(Option<Expression>),                         // Drop the highest count
+    DropLowest(Option<Expression>),                          // Drop the lowest count
     Drop(Vec<Conditional>),                   // What dice to drop based on conditionals
     CapClamp(Vec<Conditional>),               // What is capped and clamped based on conditionals
-    Replace(Vec<(Conditional, Expression)>), // List of conditionals and expressions to replace the dice with
-    NoRepeats,                               // Only allow unique dice rolls (re roll other dice)
-    NotSettle(Vec<Conditional>, Option<i32>), // Conditionals and the max number of re rolls (optional where none means to run forever)
-    Explode(Option<Vec<Conditional>>), // Optional Conditionals (None means use max value in pool)
-    LimitedExplode(Option<Vec<Conditional>>), // Optional Conditionals (None means use max value in pool)
-    PatternExplode(Vec<i32>),                 // Number pattern that if seen, will be exploded
+    ValueReplace(Vec<(Conditional, Expression)>), // List of conditionals and expressions to replace the dice with
+    Unique,                               // Only allow unique dice rolls (re roll other dice)
+    Reroll(Vec<Conditional>, Option<Expression>), // Conditionals and the max number of re rolls (optional where none means to run forever)
+    Explode(Option<Vec<Conditional>>, Option<Expression>), // Optional Conditionals (None means use max value in pool)
+    PatternExplode(Vec<Expression>),                 // Number pattern that if seen, will be exploded
     Count(Option<Vec<Conditional>>), // Optional Conditionals (None means use max value in pool)
 }
 
@@ -44,26 +43,38 @@ impl fmt::Debug for PoolModifier {
     fn fmt(&self, format: &mut fmt::Formatter) -> fmt::Result {
         use self::PoolModifier::*;
         match *self {
-            DropHighest(ref count) => write!(format, "(DH{})", count),
-            DropLowest(ref count) => write!(format, "(DL{})", count),
+            DropHighest(ref count) => match count {
+                Some(c) => write!(format, "(DH{:?})", c),
+                None => write!(format, "(DH)"),
+            },
+            DropLowest(ref count) =>  match count {
+                Some(c) => write!(format, "(DL{:?})", c),
+                None => write!(format, "(DL)"),
+            },
             Drop(ref cond) => write!(format, "(D{:?})", cond),
             CapClamp(ref cond) => write!(format, "(C{:?})", cond),
-            Replace(ref cond) => write!(format, "(R{:?})", cond),
-            NoRepeats => write!(format, "(NR)"),
-            NotSettle(ref cond, ref max) => match max {
-                Some(m) => write!(format, "(R{:?}:{})", cond, m),
+            ValueReplace(ref cond) => write!(format, "(V{:?})", cond),
+            Unique => write!(format, "(U)"),
+            Reroll(ref cond, ref max) => match max {
+                Some(m) => write!(format, "(R{:?}:{:?})", cond, m),
                 None => write!(format, "(R{:?})", cond),
             },
-            Explode(ref cond) => match cond {
-                Some(v) => write!(format, "(E{:?})", v),
-                None => write!(format, "(E)"),
-            },
-            LimitedExplode(ref cond) => match cond {
-                Some(v) => write!(format, "(LE{:?})", v),
-                None => write!(format, "(LE)"),
+            Explode(ref cond, ref exp) => {
+                write!(format, "(E{{")?;
+                match cond {
+                    Some(c) => write!(format, "{:?}}}",c)?,
+                    None => write!(format, "}}")?,
+                };
+                match exp {
+                    Some(e) => write!(format, ":{:?})",e),
+                    None => write!(format, ")"),
+                }
             },
             PatternExplode(ref patt) => write!(format, "(PE{:?})", patt),
-            Count(ref cond) => write!(format, "(#{:?})", cond),
+            Count(ref cond) => match cond {
+                Some(c) => write!(format, "(#{:?})", c),
+                None => write!(format, "(#)"),
+            },
         }
     }
 }
@@ -77,11 +88,11 @@ pub struct DicePool {
 #[cfg(test)]
 impl fmt::Debug for DicePool {
     fn fmt(&self, format: &mut fmt::Formatter) -> fmt::Result {
-        let mut modifiers = String::new();
+        write!(format, "({}d{}[", self.count, self.sides)?;
         for modif in &self.modifiers {
-            modifiers += &format!("{:?}", modif);
+            write!(format, "{:?}", modif)?;
         }
-        write!(format, "({}d{}[{}])", self.count, self.sides, modifiers)
+        write!(format, "])")
     }
 }
 

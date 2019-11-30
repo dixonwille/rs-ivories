@@ -1,6 +1,6 @@
 use nom::{
     branch::alt,
-    bytes::complete::{tag},
+    bytes::complete::tag,
     character::complete::{char as c, digit1, multispace0},
     combinator::{cut, map, map_res, opt},
     multi::{many0, many1, separated_nonempty_list},
@@ -60,7 +60,7 @@ fn parse_parens(input: &str) -> IResult<&str, Expression> {
 fn parse_conditional(input: &str) -> IResult<&str, Conditional> {
     alt((
         map(
-            preceded(tag("<="), parse_limited_factor), //TAG
+            preceded(tag("<="), parse_limited_factor),
             Conditional::LessThanOrEqualTo,
         ),
         map(
@@ -82,26 +82,29 @@ fn parse_conditional(input: &str) -> IResult<&str, Conditional> {
         map(
             preceded(opt(c('=')), parse_limited_factor),
             Conditional::EqualTo,
-        )
+        ),
     ))(input)
 }
 
 /* Parse the pool modifiers
-    H# - Drop the Highest
-    L# - Drop the Lowest
+    HE - Drop the Highest
+    LE - Drop the Lowest
     D[C] - Drop based on Conditions
     C[C] - Cap or Clamp based on Conditions
-    R[(C,E)] - Replace conditional with expression
+    V[(C,E)] - Replace conditional with expression
     U - Reroll dice until all values are unique
+    R{[C]}E - Reroll based on conditional with optional max number of rerolls
+    !{[C]}E - Explode based off of optional conditions (defaults to highest value in dice) Max number of times optional
+    !~[E]~ - Explode dice based off of a pattern
 */
 fn parse_pool_modifier(input: &str) -> IResult<&str, PoolModifier> {
     alt((
         map(
-            preceded(alt((c('H'), c('h'))), parse_digits),
+            preceded(alt((c('H'), c('h'))), opt(parse_limited_factor)),
             PoolModifier::DropHighest,
         ),
         map(
-            preceded(alt((c('L'), c('l'))), parse_digits),
+            preceded(alt((c('L'), c('l'))), opt(parse_limited_factor)),
             PoolModifier::DropLowest,
         ),
         map(
@@ -114,16 +117,52 @@ fn parse_pool_modifier(input: &str) -> IResult<&str, PoolModifier> {
         ),
         map(
             preceded(
-                alt((c('R'), c('r'))),
+                alt((c('V'), c('v'))),
                 separated_nonempty_list(
                     c(','),
                     separated_pair(parse_conditional, c('='), parse_limited_factor),
                 ),
             ),
-            PoolModifier::Replace,
+            PoolModifier::ValueReplace,
         ),
-        map(alt((c('U'), c('u'))), |_| PoolModifier::NoRepeats),
+        map(alt((c('U'), c('u'))), |_| PoolModifier::Unique),
+        map(
+            preceded(
+                alt((c('R'), c('r'))),
+                pair(
+                    alt((
+                        delimited(c('{'), parse_many_conditionals, c('}')),
+                        parse_many_conditionals,
+                    )),
+                    opt(parse_limited_factor),
+                ),
+            ),
+            |(v, m)| PoolModifier::Reroll(v, m),
+        ),
+        map(
+            pair(
+                delimited(tag("!{"), opt(parse_many_conditionals), c('}')),
+                opt(parse_limited_factor),
+            ),
+            |(c, e)| PoolModifier::Explode(c, e),
+        ),
+        map(
+            delimited(
+                tag("!~"),
+                separated_nonempty_list(c(','), parse_limited_factor),
+                c('~'),
+            ),
+            PoolModifier::PatternExplode,
+        ),
+        map(preceded(c('!'), opt(parse_many_conditionals)), |c| {
+            PoolModifier::Explode(c, None)
+        }),
+        map(preceded(c('#'), opt(parse_many_conditionals)), PoolModifier::Count),
     ))(input)
+}
+
+fn parse_many_conditionals(input: &str) -> IResult<&str, Vec<Conditional>> {
+    separated_nonempty_list(c(','), parse_conditional)(input)
 }
 
 // Parses the #d# along with all the modifiers for the pool
@@ -142,8 +181,9 @@ fn parse_dice_pool(input: &str) -> IResult<&str, Expression> {
 }
 
 // Don't allow DicePool as it should be in parens and no spacing around it
+// Also only allow positive digits if no parens as it doesn't make logical sense to allow negatives here
 fn parse_limited_factor(input: &str) -> IResult<&str, Expression> {
-    alt((map(parse_constant, Expression::Constant), parse_parens))(input)
+    alt((map(parse_digits, Expression::Constant), parse_parens))(input)
 }
 
 // Any Expression parser in here should account for space on either side of it
@@ -350,6 +390,16 @@ mod tests {
         exhaust_valid!("drop highest", parse_expression("5d10H2"), "(5d10[(DH2)])");
         exhaust_valid!("drop lowest", parse_expression("5d10L2"), "(5d10[(DL2)])");
         exhaust_valid!(
+            "drop highest w/o expression",
+            parse_expression("5d10H"),
+            "(5d10[(DH)])"
+        );
+        exhaust_valid!(
+            "drop lowest w/o expression",
+            parse_expression("5d10L"),
+            "(5d10[(DL)])"
+        );
+        exhaust_valid!(
             "drop single conditional",
             parse_expression("5d10D<=2"),
             "(5d10[(D[<=2])])"
@@ -369,7 +419,7 @@ mod tests {
             parse_expression("5d10C<=2"),
             "(5d10[(C[<=2])])"
         );
-        exhaust_valid!("no repeats", parse_expression("5d10U"), "(5d10[(NR)])");
+        exhaust_valid!("Unique", parse_expression("5d10U"), "(5d10[(U)])");
         exhaust_valid!(
             "cap or clamp multiple conditional",
             parse_expression("5d10C<=2>7"),
@@ -392,8 +442,69 @@ mod tests {
         );
         exhaust_valid!(
             "replace",
-            parse_expression("5d10R5=2,>7=2"),
-            "(5d10[(R[(=5, 2), (>7, 2)])])"
+            parse_expression("5d10V5=2,>7=2"),
+            "(5d10[(V[(=5, 2), (>7, 2)])])"
+        );
+        exhaust_valid!(
+            "reroll simple",
+            parse_expression("5d10R2"),
+            "(5d10[(R[=2])])"
+        );
+        exhaust_valid!(
+            "reroll conditions",
+            parse_expression("5d10R<2"),
+            "(5d10[(R[<2])])"
+        );
+        exhaust_valid!(
+            "reroll conditions with max",
+            parse_expression("5d10R{<2}3"),
+            "(5d10[(R[<2]:3)])"
+        );
+        exhaust_valid!(
+            "reroll multiple conditionals w/o brackets",
+            parse_expression("5d10R<=2,3"),
+            "(5d10[(R[<=2, =3])])"
+        );
+        exhaust_valid!(
+            "reroll multiple conditionals w/ brackets",
+            parse_expression("5d10R{<=2,3}"),
+            "(5d10[(R[<=2, =3])])"
+        );
+        exhaust_valid!("Explosion", parse_expression("5d10!"), "(5d10[(E{})])");
+        exhaust_valid!(
+            "Explosion with conditionals",
+            parse_expression("5d10!<=2"),
+            "(5d10[(E{[<=2]})])"
+        );
+        exhaust_valid!(
+            "Explosion with conditionals brackets",
+            parse_expression("5d10!{<=2}"),
+            "(5d10[(E{[<=2]})])"
+        );
+        exhaust_valid!(
+            "Explosion with conditionals and max",
+            parse_expression("5d10!{<=2}3"),
+            "(5d10[(E{[<=2]}:3)])"
+        );
+        exhaust_valid!(
+            "Explosion with max",
+            parse_expression("5d10!{}3"),
+            "(5d10[(E{}:3)])"
+        );
+        exhaust_valid!(
+            "Explosion Pattern",
+            parse_expression("5d10!~6,5,2~"),
+            "(5d10[(PE[6, 5, 2])])"
+        );
+        exhaust_valid!(
+            "Count with conditionals",
+            parse_expression("5d10#<=2"),
+            "(5d10[(#[<=2])])"
+        );
+        exhaust_valid!(
+            "Count with out conditionals",
+            parse_expression("5d10#"),
+            "(5d10[(#)])"
         );
     }
 }

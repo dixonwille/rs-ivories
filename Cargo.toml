@@ -16,4 +16,4 @@ is-it-maintained-open-issues = { repository = "dixonwille/rs-ivories" }
 maintenance = { status = "actively-developed" }
 
 [dependencies]
-nom = "5.0.1"
+nom = "^5"
