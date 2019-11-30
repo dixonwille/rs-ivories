@@ -157,7 +157,10 @@ fn parse_pool_modifier(input: &str) -> IResult<&str, PoolModifier> {
         map(preceded(c('!'), opt(parse_many_conditionals)), |c| {
             PoolModifier::Explode(c, None)
         }),
-        map(preceded(c('#'), opt(parse_many_conditionals)), PoolModifier::Count),
+        map(
+            preceded(c('#'), opt(parse_many_conditionals)),
+            PoolModifier::Count,
+        ),
     ))(input)
 }
 
