@@ -152,7 +152,11 @@ impl DicePool {
             rolled.push(num);
             index = index + 1;
         }
-        Ok(0)
+        let mut sum = 0;
+        for roll in rolled.iter() {
+            sum = sum + roll;
+        }
+        Ok(sum)
     }
 }
 
@@ -281,5 +285,13 @@ mod tests {
             220,
             &mut rng
         );
+    }
+
+    #[test]
+    fn dice_pool() {
+        let seed: [u8; 32] = [1; 32];
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
+        valid_evaluate!("d20", Expression::Pool(DicePool::new(1, 20)), 3, &mut rng);
+        valid_evaluate!("3d20", Expression::Pool(DicePool::new(3, 20)), 31, &mut rng);
     }
 }
