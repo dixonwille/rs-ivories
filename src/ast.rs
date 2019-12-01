@@ -96,8 +96,8 @@ impl fmt::Debug for PoolModifier {
 }
 
 pub struct DicePool {
-    pub count: i32,
-    pub sides: i32,
+    pub count: u32,
+    pub sides: u32,
     pub modifiers: Vec<PoolModifier>,
     pub consolidator: PoolConsolidator,
 }
@@ -121,7 +121,7 @@ impl fmt::Debug for DicePool {
 }
 
 impl DicePool {
-    pub fn new(count: i32, sides: i32) -> Self {
+    pub fn new(count: u32, sides: u32) -> Self {
         DicePool {
             count: count,
             sides: sides,
@@ -138,7 +138,7 @@ impl DicePool {
         self.modifiers.append(modifiers);
     }
 
-    fn evaluate<E: Rng>(self, rng: &mut E) -> Result<i32, &'static str> {
+    fn evaluate<E: Rng>(self, rng: &mut E) -> Result<u32, &'static str> {
         if self.count < 1 {
             return Err("Must have at least one dice to roll");
         }
@@ -148,11 +148,11 @@ impl DicePool {
         let mut rolled = vec![];
         let mut index = 0;
         while index < self.count {
-            let num: i32 = rng.gen_range(1, self.sides);
+            let num: u32 = rng.gen_range(1, self.sides);
             rolled.push(num);
             index = index + 1;
         }
-        let mut sum = 0;
+        let mut sum: u32 = 0;
         for roll in rolled.iter() {
             sum = sum + roll;
         }
@@ -204,7 +204,10 @@ impl Expression {
                 let (l, r) = evaluate_lr(rng, left, right)?;
                 Ok(l - r)
             }
-            Expression::Pool(p) => p.evaluate(rng),
+            Expression::Pool(p) => {
+                let v = p.evaluate(rng)?;
+                Ok(v as i32)
+            }
         }
     }
 }

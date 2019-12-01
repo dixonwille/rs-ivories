@@ -22,6 +22,11 @@ fn parse_digits(input: &str) -> IResult<&str, i32> {
     map_res(digit1, |s: &str| s.parse::<i32>())(input)
 }
 
+// Parse a number
+fn parse_unsigned_digits(input: &str) -> IResult<&str, u32> {
+    map_res(digit1, |s: &str| s.parse::<u32>())(input)
+}
+
 // Parses * or / and returns appropriate Operation
 fn parse_operation_md(input: &str) -> IResult<&str, Operation> {
     map(alt((c('*'), c('/'))), |c| {
@@ -174,7 +179,7 @@ fn parse_many_conditionals(input: &str) -> IResult<&str, Vec<Conditional>> {
 // Parses the #d# along with all the modifiers for the pool
 fn parse_dice_pool(input: &str) -> IResult<&str, Expression> {
     let (i, mut dice) = tuple((
-        separated_pair(opt(parse_digits), c('d'), parse_digits),
+        separated_pair(opt(parse_unsigned_digits), c('d'), parse_unsigned_digits),
         many0(parse_pool_modifier),
         opt(parse_pool_consolidator),
     ))(input)?;
