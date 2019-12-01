@@ -4,7 +4,7 @@ use nom::{
     character::complete::{char as c, digit1, multispace0},
     combinator::{cut, map, map_res, opt},
     multi::{many0, many1, separated_nonempty_list},
-    sequence::{delimited, pair, preceded, separated_pair},
+    sequence::{delimited, pair, preceded, separated_pair, tuple},
     IResult,
 };
 
@@ -157,11 +157,14 @@ fn parse_pool_modifier(input: &str) -> IResult<&str, PoolModifier> {
         map(preceded(c('!'), opt(parse_many_conditionals)), |c| {
             PoolModifier::Explode(c, None)
         }),
-        map(
-            preceded(c('#'), opt(parse_many_conditionals)),
-            PoolModifier::Count,
-        ),
     ))(input)
+}
+
+fn parse_pool_consolidator(input: &str) -> IResult<&str, PoolConsolidator> {
+    map(
+        preceded(c('#'), opt(parse_many_conditionals)),
+        PoolConsolidator::Count,
+    )(input)
 }
 
 fn parse_many_conditionals(input: &str) -> IResult<&str, Vec<Conditional>> {
@@ -170,16 +173,20 @@ fn parse_many_conditionals(input: &str) -> IResult<&str, Vec<Conditional>> {
 
 // Parses the #d# along with all the modifiers for the pool
 fn parse_dice_pool(input: &str) -> IResult<&str, Expression> {
-    let (i, mut dice) = pair(
+    let (i, mut dice) = tuple((
         separated_pair(opt(parse_digits), c('d'), parse_digits),
         many0(parse_pool_modifier),
-    )(input)?;
+        opt(parse_pool_consolidator),
+    ))(input)?;
     let count = match (dice.0).0 {
         Some(i) => i,
         None => 1,
     };
     let mut pool = DicePool::new(count, (dice.0).1);
     pool.append_modifiers(&mut dice.1);
+    if let Some(c) = dice.2 {
+        pool.consolidator = c;
+    }
     Ok((i, Expression::Pool(pool)))
 }
 
@@ -292,12 +299,12 @@ mod tests {
         exhaust_valid!(
             "dice treated as constant on right",
             parse_expression("(1+3)3d10"),
-            "((1 + 3) * (3d10[]))"
+            "((1 + 3) * (3d10[]+))"
         );
         exhaust_valid!(
             "dice treated as constant on left",
             parse_expression("3d10(1+3)"),
-            "((3d10[]) * (1 + 3))"
+            "((3d10[]+) * (1 + 3))"
         );
         exhaust_valid!(
             "random order 1",
@@ -336,7 +343,7 @@ mod tests {
         exhaust_valid!(
             "around dice",
             parse_expression("1+  2d10  +3"),
-            "((1 + (2d10[])) + 3)"
+            "((1 + (2d10[]+)) + 3)"
         )
     }
 
@@ -363,151 +370,151 @@ mod tests {
         exhaust_valid!(
             "simple dice without count",
             parse_expression("d20"),
-            "(1d20[])"
+            "(1d20[]+)"
         );
         exhaust_valid!(
             "simple dice with count",
             parse_expression("5d20"),
-            "(5d20[])"
+            "(5d20[]+)"
         );
         exhaust_valid!(
             "dice with arithmatic",
             parse_expression("2d10 + 7"),
-            "((2d10[]) + 7)"
+            "((2d10[]+) + 7)"
         );
         exhaust_valid!(
             "dice with arithmatic",
             parse_expression("2d10D<2 + 7"),
-            "((2d10[(D[<2])]) + 7)"
+            "((2d10[(D[<2])]+) + 7)"
         );
         exhaust_valid!(
             "dice with arithmatic in condtional",
             parse_expression("2d10D<(2 + 7)"),
-            "(2d10[(D[<(2 + 7)])])"
+            "(2d10[(D[<(2 + 7)])]+)"
         );
         exhaust_valid!(
             "dice with dice in condtional",
             parse_expression("2d10D<(2d10)"),
-            "(2d10[(D[<(2d10[])])])"
+            "(2d10[(D[<(2d10[]+)])]+)"
         );
-        exhaust_valid!("drop highest", parse_expression("5d10H2"), "(5d10[(DH2)])");
-        exhaust_valid!("drop lowest", parse_expression("5d10L2"), "(5d10[(DL2)])");
+        exhaust_valid!("drop highest", parse_expression("5d10H2"), "(5d10[(DH2)]+)");
+        exhaust_valid!("drop lowest", parse_expression("5d10L2"), "(5d10[(DL2)]+)");
         exhaust_valid!(
             "drop highest w/o expression",
             parse_expression("5d10H"),
-            "(5d10[(DH)])"
+            "(5d10[(DH)]+)"
         );
         exhaust_valid!(
             "drop lowest w/o expression",
             parse_expression("5d10L"),
-            "(5d10[(DL)])"
+            "(5d10[(DL)]+)"
         );
         exhaust_valid!(
             "drop single conditional",
             parse_expression("5d10D<=2"),
-            "(5d10[(D[<=2])])"
+            "(5d10[(D[<=2])]+)"
         );
         exhaust_valid!(
             "drop single conditional",
             parse_expression("5d10D<=2"),
-            "(5d10[(D[<=2])])"
+            "(5d10[(D[<=2])]+)"
         );
         exhaust_valid!(
             "drop multiple conditional",
             parse_expression("5d10D<=2>7"),
-            "(5d10[(D[<=2, >7])])"
+            "(5d10[(D[<=2, >7])]+)"
         );
         exhaust_valid!(
             "cap or clamp single conditional",
             parse_expression("5d10C<=2"),
-            "(5d10[(C[<=2])])"
+            "(5d10[(C[<=2])]+)"
         );
-        exhaust_valid!("Unique", parse_expression("5d10U"), "(5d10[(U)])");
+        exhaust_valid!("Unique", parse_expression("5d10U"), "(5d10[(U)]+)");
         exhaust_valid!(
             "cap or clamp multiple conditional",
             parse_expression("5d10C<=2>7"),
-            "(5d10[(C[<=2, >7])])"
+            "(5d10[(C[<=2, >7])]+)"
         );
         exhaust_valid!(
             "multiple conditions",
             parse_expression("5d10D<=2C>=7"),
-            "(5d10[(D[<=2])(C[>=7])])"
+            "(5d10[(D[<=2])(C[>=7])]+)"
         );
         exhaust_valid!(
             "conditional with equals",
             parse_expression("5d10D=2"),
-            "(5d10[(D[=2])])"
+            "(5d10[(D[=2])]+)"
         );
         exhaust_valid!(
             "conditional with equals",
             parse_expression("5d10D2"),
-            "(5d10[(D[=2])])"
+            "(5d10[(D[=2])]+)"
         );
         exhaust_valid!(
             "replace",
             parse_expression("5d10V5=2,>7=2"),
-            "(5d10[(V[(=5, 2), (>7, 2)])])"
+            "(5d10[(V[(=5, 2), (>7, 2)])]+)"
         );
         exhaust_valid!(
             "reroll simple",
             parse_expression("5d10R2"),
-            "(5d10[(R[=2])])"
+            "(5d10[(R[=2])]+)"
         );
         exhaust_valid!(
             "reroll conditions",
             parse_expression("5d10R<2"),
-            "(5d10[(R[<2])])"
+            "(5d10[(R[<2])]+)"
         );
         exhaust_valid!(
             "reroll conditions with max",
             parse_expression("5d10R{<2}3"),
-            "(5d10[(R[<2]:3)])"
+            "(5d10[(R[<2]:3)]+)"
         );
         exhaust_valid!(
             "reroll multiple conditionals w/o brackets",
             parse_expression("5d10R<=2,3"),
-            "(5d10[(R[<=2, =3])])"
+            "(5d10[(R[<=2, =3])]+)"
         );
         exhaust_valid!(
             "reroll multiple conditionals w/ brackets",
             parse_expression("5d10R{<=2,3}"),
-            "(5d10[(R[<=2, =3])])"
+            "(5d10[(R[<=2, =3])]+)"
         );
-        exhaust_valid!("Explosion", parse_expression("5d10!"), "(5d10[(E{})])");
+        exhaust_valid!("Explosion", parse_expression("5d10!"), "(5d10[(E{})]+)");
         exhaust_valid!(
             "Explosion with conditionals",
             parse_expression("5d10!<=2"),
-            "(5d10[(E{[<=2]})])"
+            "(5d10[(E{[<=2]})]+)"
         );
         exhaust_valid!(
             "Explosion with conditionals brackets",
             parse_expression("5d10!{<=2}"),
-            "(5d10[(E{[<=2]})])"
+            "(5d10[(E{[<=2]})]+)"
         );
         exhaust_valid!(
             "Explosion with conditionals and max",
             parse_expression("5d10!{<=2}3"),
-            "(5d10[(E{[<=2]}:3)])"
+            "(5d10[(E{[<=2]}:3)]+)"
         );
         exhaust_valid!(
             "Explosion with max",
             parse_expression("5d10!{}3"),
-            "(5d10[(E{}:3)])"
+            "(5d10[(E{}:3)]+)"
         );
         exhaust_valid!(
             "Explosion Pattern",
             parse_expression("5d10!~6,5,2~"),
-            "(5d10[(PE[6, 5, 2])])"
+            "(5d10[(PE[6, 5, 2])]+)"
         );
         exhaust_valid!(
             "Count with conditionals",
             parse_expression("5d10#<=2"),
-            "(5d10[(#[<=2])])"
+            "(5d10[]#[<=2])"
         );
         exhaust_valid!(
             "Count with out conditionals",
             parse_expression("5d10#"),
-            "(5d10[(#)])"
+            "(5d10[]#)"
         );
     }
 }

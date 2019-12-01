@@ -1,6 +1,8 @@
 #[cfg(test)]
 use std::fmt;
 
+use rand::Rng;
+
 pub enum Conditional {
     LessThan(Expression),
     LessThanOrEqualTo(Expression),
@@ -25,6 +27,25 @@ impl fmt::Debug for Conditional {
     }
 }
 
+pub enum PoolConsolidator {
+    Addition,
+    Count(Option<Vec<Conditional>>),
+}
+
+#[cfg(test)]
+impl fmt::Debug for PoolConsolidator {
+    fn fmt(&self, format: &mut fmt::Formatter) -> fmt::Result {
+        use self::PoolConsolidator::*;
+        match *self {
+            Addition => write!(format, "+"),
+            Count(ref cond) => match cond {
+                Some(c) => write!(format, "#{:?}", c),
+                None => write!(format, "#[]"),
+            },
+        }
+    }
+}
+
 pub enum PoolModifier {
     DropHighest(Option<Expression>), // Drop the highest count
     DropLowest(Option<Expression>),  // Drop the lowest count
@@ -35,7 +56,6 @@ pub enum PoolModifier {
     Reroll(Vec<Conditional>, Option<Expression>), // Conditionals and the max number of re rolls (optional where none means to run forever)
     Explode(Option<Vec<Conditional>>, Option<Expression>), // Optional Conditionals (None means use max value in pool)
     PatternExplode(Vec<Expression>), // Number pattern that if seen, will be exploded
-    Count(Option<Vec<Conditional>>), // Optional Conditionals (None means use max value in pool)
 }
 
 #[cfg(test)]
@@ -71,10 +91,6 @@ impl fmt::Debug for PoolModifier {
                 }
             }
             PatternExplode(ref patt) => write!(format, "(PE{:?})", patt),
-            Count(ref cond) => match cond {
-                Some(c) => write!(format, "(#{:?})", c),
-                None => write!(format, "(#)"),
-            },
         }
     }
 }
@@ -83,6 +99,7 @@ pub struct DicePool {
     pub count: i32,
     pub sides: i32,
     pub modifiers: Vec<PoolModifier>,
+    pub consolidator: PoolConsolidator,
 }
 
 #[cfg(test)]
@@ -92,7 +109,14 @@ impl fmt::Debug for DicePool {
         for modif in &self.modifiers {
             write!(format, "{:?}", modif)?;
         }
-        write!(format, "])")
+        write!(format, "]")?;
+        match &self.consolidator {
+            PoolConsolidator::Addition => write!(format, "+)"),
+            PoolConsolidator::Count(count) => match count {
+                Some(c) => write!(format, "#{:?})", c),
+                None => write!(format, "#)"),
+            },
+        }
     }
 }
 
@@ -102,6 +126,7 @@ impl DicePool {
             count: count,
             sides: sides,
             modifiers: vec![],
+            consolidator: PoolConsolidator::Addition,
         }
     }
 
@@ -111,6 +136,23 @@ impl DicePool {
 
     pub fn append_modifiers(&mut self, modifiers: &mut Vec<PoolModifier>) {
         self.modifiers.append(modifiers);
+    }
+
+    fn evaluate<E: Rng>(self, rng: &mut E) -> Result<i32, &'static str> {
+        if self.count < 1 {
+            return Err("Must have at least one dice to roll");
+        }
+        if self.sides < 2 {
+            return Err("Must have at least 2 sides to roll");
+        }
+        let mut rolled = vec![];
+        let mut index = 0;
+        while index < self.count {
+            let num: i32 = rng.gen_range(1, self.sides);
+            rolled.push(num);
+            index = index + 1;
+        }
+        Ok(0)
     }
 }
 
@@ -139,55 +181,63 @@ impl fmt::Debug for Expression {
 }
 
 impl Expression {
-    pub fn evaluate(self) -> Result<i32, &'static str> {
+    pub fn evaluate<E: Rng>(self, rng: &mut E) -> Result<i32, &'static str> {
         match self {
             Expression::Constant(i) => Ok(i),
             Expression::Multiplication(left, right) => {
-                let (l, r) = evaluate_lr(left, right)?;
+                let (l, r) = evaluate_lr(rng, left, right)?;
                 Ok(l * r)
             }
             Expression::Division(left, right) => {
-                let (l, r) = evaluate_lr(left, right)?;
+                let (l, r) = evaluate_lr(rng, left, right)?;
                 Ok(l / r)
             }
             Expression::Addition(left, right) => {
-                let (l, r) = evaluate_lr(left, right)?;
+                let (l, r) = evaluate_lr(rng, left, right)?;
                 Ok(l + r)
             }
             Expression::Subtraction(left, right) => {
-                let (l, r) = evaluate_lr(left, right)?;
+                let (l, r) = evaluate_lr(rng, left, right)?;
                 Ok(l - r)
             }
-            _ => Err("Not Implimented"),
+            Expression::Pool(p) => p.evaluate(rng),
         }
     }
 }
 
-fn evaluate_lr(left: Box<Expression>, right: Box<Expression>) -> Result<(i32, i32), &'static str> {
-    let l = left.evaluate()?;
-    let r = right.evaluate()?;
+fn evaluate_lr<E: Rng>(
+    rng: &mut E,
+    left: Box<Expression>,
+    right: Box<Expression>,
+) -> Result<(i32, i32), &'static str> {
+    let l = left.evaluate(rng)?;
+    let r = right.evaluate(rng)?;
     Ok((l, r))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::{rngs::StdRng, SeedableRng};
 
     macro_rules! valid_evaluate {
-        ($name:expr, $input:expr, $exp:expr) => {
-            assert_eq!($input.evaluate(), Ok($exp), "{} failed", $name);
+        ($name:expr, $input:expr, $exp:expr, $rng:expr) => {
+            assert_eq!($input.evaluate($rng), Ok($exp), "{} failed", $name);
         };
     }
 
     #[test]
     fn arithmatic() {
+        let seed: [u8; 32] = [1; 32];
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
         valid_evaluate!(
             "Addition",
             Expression::Addition(
                 Box::new(Expression::Constant(10)),
                 Box::new(Expression::Constant(11))
             ),
-            21
+            21,
+            &mut rng
         );
         valid_evaluate!(
             "Subtraction",
@@ -195,7 +245,8 @@ mod tests {
                 Box::new(Expression::Constant(10)),
                 Box::new(Expression::Constant(11))
             ),
-            -1
+            -1,
+            &mut rng
         );
         valid_evaluate!(
             "Multiplication",
@@ -203,7 +254,8 @@ mod tests {
                 Box::new(Expression::Constant(10)),
                 Box::new(Expression::Constant(11))
             ),
-            110
+            110,
+            &mut rng
         );
         valid_evaluate!(
             "Division",
@@ -211,7 +263,8 @@ mod tests {
                 Box::new(Expression::Constant(10)),
                 Box::new(Expression::Constant(11))
             ),
-            0
+            0,
+            &mut rng
         );
         valid_evaluate!(
             "Multiple Levels",
@@ -225,7 +278,8 @@ mod tests {
                     Box::new(Expression::Constant(11))
                 ))
             ),
-            220
+            220,
+            &mut rng
         );
     }
 }
