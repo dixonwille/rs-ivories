@@ -12,6 +12,49 @@ pub enum Conditional {
     NotEqualTo(Expression),
 }
 
+impl Conditional {
+    fn evaluate<E: Rng>(&self, rng: &mut E, left: i32) -> Result<bool, &'static str> {
+        match self {
+            Conditional::LessThan(e) => {
+                let right = e.evaluate(rng)?;
+                Ok(left < right)
+            }
+            Conditional::LessThanOrEqualTo(e) => {
+                let right = e.evaluate(rng)?;
+                Ok(left <= right)
+            }
+            Conditional::GreaterThan(e) => {
+                let right = e.evaluate(rng)?;
+                Ok(left > right)
+            }
+            Conditional::GreaterThanOrEqualTo(e) => {
+                let right = e.evaluate(rng)?;
+                Ok(left >= right)
+            }
+            Conditional::EqualTo(e) => {
+                let right = e.evaluate(rng)?;
+                Ok(left == right)
+            }
+            Conditional::NotEqualTo(e) => {
+                let right = e.evaluate(rng)?;
+                Ok(left != right)
+            }
+        }
+    }
+    fn evaluate_many<E: Rng>(
+        conds: &Vec<Conditional>,
+        rng: &mut E,
+        left: i32,
+    ) -> Result<bool, &'static str> {
+        for cond in conds.iter() {
+            if cond.evaluate(rng, left)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+}
+
 #[cfg(test)]
 impl fmt::Debug for Conditional {
     fn fmt(&self, format: &mut fmt::Formatter) -> fmt::Result {
@@ -30,6 +73,45 @@ impl fmt::Debug for Conditional {
 pub enum PoolConsolidator {
     Addition,
     Count(Option<Vec<Conditional>>),
+}
+
+impl PoolConsolidator {
+    fn evaluate<E: Rng>(
+        &self,
+        rng: &mut E,
+        max: u32,
+        rolls: Vec<u32>,
+    ) -> Result<u32, &'static str> {
+        match self {
+            PoolConsolidator::Addition => {
+                let mut sum = 0;
+                for roll in rolls.iter() {
+                    sum = sum + roll;
+                }
+                Ok(sum)
+            }
+            PoolConsolidator::Count(conds) => match conds {
+                Some(cs) => {
+                    let mut count = 0;
+                    for roll in rolls.iter() {
+                        if Conditional::evaluate_many(cs, rng, *roll as i32)? {
+                            count = count + 1;
+                        }
+                    }
+                    Ok(count)
+                }
+                None => {
+                    let mut count = 0;
+                    for roll in rolls.iter() {
+                        if *roll == max {
+                            count = count + 1;
+                        }
+                    }
+                    Ok(count)
+                }
+            },
+        }
+    }
 }
 
 #[cfg(test)]
@@ -138,7 +220,7 @@ impl DicePool {
         self.modifiers.append(modifiers);
     }
 
-    fn evaluate<E: Rng>(self, rng: &mut E) -> Result<u32, &'static str> {
+    fn evaluate<E: Rng>(&self, rng: &mut E) -> Result<u32, &'static str> {
         if self.count < 1 {
             return Err("Must have at least one dice to roll");
         }
@@ -152,11 +234,7 @@ impl DicePool {
             rolled.push(num);
             index = index + 1;
         }
-        let mut sum: u32 = 0;
-        for roll in rolled.iter() {
-            sum = sum + roll;
-        }
-        Ok(sum)
+        self.consolidator.evaluate(rng, self.sides, rolled)
     }
 }
 
@@ -185,9 +263,9 @@ impl fmt::Debug for Expression {
 }
 
 impl Expression {
-    pub fn evaluate<E: Rng>(self, rng: &mut E) -> Result<i32, &'static str> {
+    pub fn evaluate<E: Rng>(&self, rng: &mut E) -> Result<i32, &'static str> {
         match self {
-            Expression::Constant(i) => Ok(i),
+            Expression::Constant(i) => Ok(*i),
             Expression::Multiplication(left, right) => {
                 let (l, r) = evaluate_lr(rng, left, right)?;
                 Ok(l * r)
@@ -214,8 +292,8 @@ impl Expression {
 
 fn evaluate_lr<E: Rng>(
     rng: &mut E,
-    left: Box<Expression>,
-    right: Box<Expression>,
+    left: &Box<Expression>,
+    right: &Box<Expression>,
 ) -> Result<(i32, i32), &'static str> {
     let l = left.evaluate(rng)?;
     let r = right.evaluate(rng)?;
@@ -296,5 +374,29 @@ mod tests {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         valid_evaluate!("d20", Expression::Pool(DicePool::new(1, 20)), 3, &mut rng);
         valid_evaluate!("3d20", Expression::Pool(DicePool::new(3, 20)), 31, &mut rng);
+        valid_evaluate!(
+            "3d20#",
+            Expression::Pool(DicePool {
+                consolidator: PoolConsolidator::Count(None),
+                modifiers: vec![],
+                count: 3,
+                sides: 20
+            }),
+            0,
+            &mut rng
+        );
+        valid_evaluate!(
+            "3d20#<20",
+            Expression::Pool(DicePool {
+                consolidator: PoolConsolidator::Count(Some(vec![Conditional::LessThan(
+                    Expression::Constant(20)
+                )])),
+                modifiers: vec![],
+                count: 3,
+                sides: 20
+            }),
+            3,
+            &mut rng
+        );
     }
 }
