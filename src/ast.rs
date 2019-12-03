@@ -3,7 +3,11 @@ use std::fmt;
 
 use rand::Rng;
 
-pub enum Conditional {
+trait Evaluatable {
+    fn evaluate<E: Rng>(&mut self, rng: &mut E);
+}
+
+pub enum ConditionalType {
     LessThan(Expression),
     LessThanOrEqualTo(Expression),
     GreaterThan(Expression),
@@ -12,60 +16,130 @@ pub enum Conditional {
     NotEqualTo(Expression),
 }
 
+pub struct Conditional {
+    pub conditional: ConditionalType,
+    pub evaluated: Option<SimpleConditionalType>,
+}
+
 impl Conditional {
-    fn evaluate<E: Rng>(&self, rng: &mut E, left: i32) -> Result<bool, &'static str> {
-        match self {
-            Conditional::LessThan(e) => {
-                let right = e.evaluate(rng)?;
-                Ok(left < right)
-            }
-            Conditional::LessThanOrEqualTo(e) => {
-                let right = e.evaluate(rng)?;
-                Ok(left <= right)
-            }
-            Conditional::GreaterThan(e) => {
-                let right = e.evaluate(rng)?;
-                Ok(left > right)
-            }
-            Conditional::GreaterThanOrEqualTo(e) => {
-                let right = e.evaluate(rng)?;
-                Ok(left >= right)
-            }
-            Conditional::EqualTo(e) => {
-                let right = e.evaluate(rng)?;
-                Ok(left == right)
-            }
-            Conditional::NotEqualTo(e) => {
-                let right = e.evaluate(rng)?;
-                Ok(left != right)
-            }
+    pub fn new(conditional: ConditionalType) -> Self {
+        Conditional {
+            conditional: conditional,
+            evaluated: None,
         }
     }
-    fn evaluate_many<E: Rng>(
-        conds: &Vec<Conditional>,
-        rng: &mut E,
-        left: i32,
-    ) -> Result<bool, &'static str> {
+
+    fn evaluate_many<E: Rng>(conds: &mut Vec<Conditional>, rng: &mut E){
+        for cond in conds.iter_mut() {
+            cond.evaluate(rng);
+        }
+    }
+
+    fn compare(&self, left: i32) -> bool {
+        let e = match &self.evaluated {
+            Some(e) => e,
+            None => unreachable!("Conditional expression has not been simplified yet")
+        };
+        e.compare(left)
+    }
+
+    fn compare_many(conds: &Vec<Conditional>, left: i32) -> bool {
         for cond in conds.iter() {
-            if cond.evaluate(rng, left)? {
-                return Ok(true);
+            if cond.compare(left) {
+                return true
             }
         }
-        Ok(false)
+        false
+    }
+}
+
+impl Evaluatable for Conditional {
+    fn evaluate<E: Rng>(&mut self, rng: &mut E){
+        match self.conditional {
+            ConditionalType::LessThan(ref mut e) => {
+                e.evaluate(rng);
+                let r = match e.evaluated{
+                    Some(r) => r,
+                    None => unreachable!("less than expression was not evaluated")
+                };
+                self.evaluated = Some(SimpleConditionalType::LessThan(r));
+            }
+            ConditionalType::LessThanOrEqualTo(ref mut e) => {
+                e.evaluate(rng);
+                let r = match e.evaluated{
+                    Some(r) => r,
+                    None => unreachable!("less than or equal to expression was not evaluated")
+                };
+                self.evaluated = Some(SimpleConditionalType::LessThanOrEqualTo(r));
+            }
+            ConditionalType::GreaterThan(ref mut e) => {
+                e.evaluate(rng);
+                let r = match e.evaluated{
+                    Some(r) => r,
+                    None => unreachable!("greater than expression was not evaluated")
+                };
+                self.evaluated = Some(SimpleConditionalType::GreaterThan(r));
+            }
+            ConditionalType::GreaterThanOrEqualTo(ref mut e) => {
+                e.evaluate(rng);
+                let r = match e.evaluated{
+                    Some(r) => r,
+                    None => unreachable!("greater than or equal to expression was not evaluated")
+                };
+                self.evaluated = Some(SimpleConditionalType::GreaterThanOrEqualTo(r));
+            }
+            ConditionalType::EqualTo(ref mut e) => {
+                e.evaluate(rng);
+                let r = match e.evaluated{
+                    Some(r) => r,
+                    None => unreachable!("equal to expression was not evaluated")
+                };
+                self.evaluated = Some(SimpleConditionalType::EqualTo(r));
+            }
+            ConditionalType::NotEqualTo(ref mut e) => {
+                e.evaluate(rng);
+                let r = match e.evaluated{
+                    Some(r) => r,
+                    None => unreachable!("not equal to expression was no evaluated")
+                };
+                self.evaluated = Some(SimpleConditionalType::NotEqualTo(r));
+            }
+        }
     }
 }
 
 #[cfg(test)]
 impl fmt::Debug for Conditional {
     fn fmt(&self, format: &mut fmt::Formatter) -> fmt::Result {
-        use self::Conditional::*;
+        match self.conditional {
+            ConditionalType::LessThan(ref val) => write!(format, "<{:?}", val),
+            ConditionalType::LessThanOrEqualTo(ref val) => write!(format, "<={:?}", val),
+            ConditionalType::GreaterThan(ref val) => write!(format, ">{:?}", val),
+            ConditionalType::GreaterThanOrEqualTo(ref val) => write!(format, ">={:?}", val),
+            ConditionalType::EqualTo(ref val) => write!(format, "={:?}", val),
+            ConditionalType::NotEqualTo(ref val) => write!(format, "!={:?}", val),
+        }
+    }
+}
+
+pub enum SimpleConditionalType {
+    LessThan(i32),
+    LessThanOrEqualTo(i32),
+    GreaterThan(i32),
+    GreaterThanOrEqualTo(i32),
+    EqualTo(i32),
+    NotEqualTo(i32),
+}
+
+impl SimpleConditionalType {
+    fn compare(&self, left: i32) -> bool {
         match *self {
-            LessThan(ref val) => write!(format, "<{:?}", val),
-            LessThanOrEqualTo(ref val) => write!(format, "<={:?}", val),
-            GreaterThan(ref val) => write!(format, ">{:?}", val),
-            GreaterThanOrEqualTo(ref val) => write!(format, ">={:?}", val),
-            EqualTo(ref val) => write!(format, "={:?}", val),
-            NotEqualTo(ref val) => write!(format, "!={:?}", val),
+            SimpleConditionalType::LessThan(right) => left < right,
+            SimpleConditionalType::LessThanOrEqualTo(right) => left <= right,
+            SimpleConditionalType::GreaterThan(right) => left > right,
+            SimpleConditionalType::GreaterThanOrEqualTo(right) => left >= right,
+            SimpleConditionalType::EqualTo(right) => left == right,
+            SimpleConditionalType::NotEqualTo(right) => left != right
         }
     }
 }
@@ -76,29 +150,24 @@ pub enum PoolConsolidator {
 }
 
 impl PoolConsolidator {
-    fn evaluate<E: Rng>(
-        &self,
-        rng: &mut E,
-        max: u32,
-        rolls: Vec<u32>,
-    ) -> Result<u32, &'static str> {
+    fn consolidate(&self, max: u32, rolls: &Vec<u32>) -> i32 {
         match self {
             PoolConsolidator::Addition => {
                 let mut sum = 0;
                 for roll in rolls.iter() {
                     sum = sum + roll;
                 }
-                Ok(sum)
+                sum as i32
             }
             PoolConsolidator::Count(conds) => match conds {
                 Some(cs) => {
                     let mut count = 0;
                     for roll in rolls.iter() {
-                        if Conditional::evaluate_many(cs, rng, *roll as i32)? {
+                        if Conditional::compare_many(cs, *roll as i32) {
                             count = count + 1;
                         }
                     }
-                    Ok(count)
+                    count
                 }
                 None => {
                     let mut count = 0;
@@ -107,9 +176,23 @@ impl PoolConsolidator {
                             count = count + 1;
                         }
                     }
-                    Ok(count)
+                    count
                 }
-            },
+            }
+        }
+    }
+}
+
+impl Evaluatable for PoolConsolidator {
+    fn evaluate<E: Rng>(&mut self, rng: &mut E){
+        match self {
+            PoolConsolidator::Addition => {},
+            PoolConsolidator::Count(conds) => {
+                match conds {
+                    Some(cs) => return Conditional::evaluate_many(cs, rng),
+                    None => return
+                }
+            }
         }
     }
 }
@@ -182,6 +265,44 @@ pub struct DicePool {
     pub sides: u32,
     pub modifiers: Vec<PoolModifier>,
     pub consolidator: PoolConsolidator,
+    pub evaluated: Option<i32>,
+    pub original_rolls: Option<Vec<u32>>
+}
+
+impl DicePool {
+    pub fn new(count: u32, sides: u32) -> Self {
+        DicePool {
+            count: count,
+            sides: sides,
+            modifiers: vec![],
+            consolidator: PoolConsolidator::Addition,
+            evaluated: None,
+            original_rolls: None,
+        }
+    }
+
+    pub fn append_modifier(&mut self, modifier: PoolModifier) {
+        self.modifiers.push(modifier);
+    }
+
+    pub fn append_modifiers(&mut self, modifiers: &mut Vec<PoolModifier>) {
+        self.modifiers.append(modifiers);
+    }
+}
+
+impl Evaluatable for DicePool {
+    fn evaluate<E: Rng>(&mut self, rng: &mut E) {
+        let mut rolled = Vec::with_capacity(self.count as usize);
+        let mut index = 0;
+        while index < self.count {
+            let num: u32 = rng.gen_range(1, self.sides);
+            rolled.push(num);
+            index = index + 1;
+        }
+        self.original_rolls = Some(rolled);
+        self.consolidator.evaluate(rng);
+        self.evaluated = Some(self.consolidator.consolidate(self.sides, self.original_rolls.as_ref().unwrap()));
+    }
 }
 
 #[cfg(test)]
@@ -202,201 +323,118 @@ impl fmt::Debug for DicePool {
     }
 }
 
-impl DicePool {
-    pub fn new(count: u32, sides: u32) -> Self {
-        DicePool {
-            count: count,
-            sides: sides,
-            modifiers: vec![],
-            consolidator: PoolConsolidator::Addition,
-        }
-    }
-
-    pub fn append_modifier(&mut self, modifier: PoolModifier) {
-        self.modifiers.push(modifier);
-    }
-
-    pub fn append_modifiers(&mut self, modifiers: &mut Vec<PoolModifier>) {
-        self.modifiers.append(modifiers);
-    }
-
-    fn evaluate<E: Rng>(&self, rng: &mut E) -> Result<u32, &'static str> {
-        if self.count < 1 {
-            return Err("Must have at least one dice to roll");
-        }
-        if self.sides < 2 {
-            return Err("Must have at least 2 sides to roll");
-        }
-        let mut rolled = vec![];
-        let mut index = 0;
-        while index < self.count {
-            let num: u32 = rng.gen_range(1, self.sides);
-            rolled.push(num);
-            index = index + 1;
-        }
-        self.consolidator.evaluate(rng, self.sides, rolled)
-    }
-}
-
-pub enum Expression {
+pub enum ExpressionType {
     Constant(i32),
     Pool(DicePool),
-    Multiplication(Box<Expression>, Box<Expression>),
-    Division(Box<Expression>, Box<Expression>),
-    Addition(Box<Expression>, Box<Expression>),
-    Subtraction(Box<Expression>, Box<Expression>),
+    Multiplication(Expression, Expression),
+    Division(Expression, Expression),
+    Addition(Expression, Expression),
+    Subtraction(Expression, Expression),
 }
 
-#[cfg(test)]
-impl fmt::Debug for Expression {
-    fn fmt(&self, format: &mut fmt::Formatter) -> fmt::Result {
-        use self::Expression::*;
-        match *self {
-            Constant(ref val) => write!(format, "{}", val),
-            Pool(ref dice) => write!(format, "{:?}", dice),
-            Multiplication(ref left, ref right) => write!(format, "({:?} * {:?})", left, right),
-            Division(ref left, ref right) => write!(format, "({:?} / {:?})", left, right),
-            Addition(ref left, ref right) => write!(format, "({:?} + {:?})", left, right),
-            Subtraction(ref left, ref right) => write!(format, "({:?} - {:?})", left, right),
-        }
-    }
+pub struct Expression {
+    pub expression: Box<ExpressionType>,
+    pub evaluated: Option<i32>,
 }
 
 impl Expression {
-    pub fn evaluate<E: Rng>(&self, rng: &mut E) -> Result<i32, &'static str> {
-        match self {
-            Expression::Constant(i) => Ok(*i),
-            Expression::Multiplication(left, right) => {
-                let (l, r) = evaluate_lr(rng, left, right)?;
-                Ok(l * r)
+    pub fn new(expression: ExpressionType) -> Self {
+        Expression {
+            expression: Box::new(expression),
+            evaluated: None,
+        }
+    }
+
+    fn evaluate_lr<E: Rng>(rng: &mut E, left: &mut Expression, right: &mut Expression) {
+        left.evaluate(rng);
+        right.evaluate(rng);
+    }
+}
+
+impl Evaluatable for Expression {
+    fn evaluate<E: Rng>(&mut self, rng: &mut E) {
+        match *self.expression {
+            ExpressionType::Constant(i) => {
+                self.evaluated = Some(i);
             }
-            Expression::Division(left, right) => {
-                let (l, r) = evaluate_lr(rng, left, right)?;
-                Ok(l / r)
+            ExpressionType::Multiplication(ref mut left, ref mut right) => {
+                Expression::evaluate_lr(rng, left, right);
+                let l = match left.evaluated {
+                    Some(l) => l,
+                    None => unreachable!("multiplication left was not evaluated"),
+                };
+                let r = match right.evaluated {
+                    Some(r) => r,
+                    None => unreachable!("multiplication right was not evaluated"),
+                };
+                self.evaluated = Some(l * r);
             }
-            Expression::Addition(left, right) => {
-                let (l, r) = evaluate_lr(rng, left, right)?;
-                Ok(l + r)
+            ExpressionType::Division(ref mut left, ref mut right) => {
+                Expression::evaluate_lr(rng, left, right);
+                let l = match left.evaluated {
+                    Some(l) => l,
+                    None => unreachable!("division left was not evaluated"),
+                };
+                let r = match right.evaluated {
+                    Some(r) => r,
+                    None => unreachable!("division right was not evaluated"),
+                };
+                self.evaluated = Some(l / r);
             }
-            Expression::Subtraction(left, right) => {
-                let (l, r) = evaluate_lr(rng, left, right)?;
-                Ok(l - r)
+            ExpressionType::Addition(ref mut left, ref mut right) => {
+                Expression::evaluate_lr(rng, left, right);
+                let l = match left.evaluated {
+                    Some(l) => l,
+                    None => unreachable!("addition left was not evaluated"),
+                };
+                let r = match right.evaluated {
+                    Some(r) => r,
+                    None => unreachable!("addition right was not evaluated"),
+                };
+                self.evaluated = Some(l + r);
             }
-            Expression::Pool(p) => {
-                let v = p.evaluate(rng)?;
-                Ok(v as i32)
+            ExpressionType::Subtraction(ref mut left, ref mut right) => {
+                Expression::evaluate_lr(rng, left, right);
+                let l = match left.evaluated {
+                    Some(l) => l,
+                    None => unreachable!("subtraction left was not evaluated"),
+                };
+                let r = match right.evaluated {
+                    Some(r) => r,
+                    None => unreachable!("subtraction right was not evaluated"),
+                };
+                self.evaluated = Some(l - r);
+            }
+            ExpressionType::Pool(ref mut p) => {
+                p.evaluate(rng);
+                let v = match p.evaluated {
+                    Some(v) => v,
+                    None => unreachable!("dice pool was not evaluated"),
+                };
+                self.evaluated = Some(v);
             }
         }
     }
 }
 
-fn evaluate_lr<E: Rng>(
-    rng: &mut E,
-    left: &Box<Expression>,
-    right: &Box<Expression>,
-) -> Result<(i32, i32), &'static str> {
-    let l = left.evaluate(rng)?;
-    let r = right.evaluate(rng)?;
-    Ok((l, r))
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use rand::{rngs::StdRng, SeedableRng};
-
-    macro_rules! valid_evaluate {
-        ($name:expr, $input:expr, $exp:expr, $rng:expr) => {
-            assert_eq!($input.evaluate($rng), Ok($exp), "{} failed", $name);
-        };
-    }
-
-    #[test]
-    fn arithmatic() {
-        let seed: [u8; 32] = [1; 32];
-        let mut rng: StdRng = SeedableRng::from_seed(seed);
-        valid_evaluate!(
-            "Addition",
-            Expression::Addition(
-                Box::new(Expression::Constant(10)),
-                Box::new(Expression::Constant(11))
-            ),
-            21,
-            &mut rng
-        );
-        valid_evaluate!(
-            "Subtraction",
-            Expression::Subtraction(
-                Box::new(Expression::Constant(10)),
-                Box::new(Expression::Constant(11))
-            ),
-            -1,
-            &mut rng
-        );
-        valid_evaluate!(
-            "Multiplication",
-            Expression::Multiplication(
-                Box::new(Expression::Constant(10)),
-                Box::new(Expression::Constant(11))
-            ),
-            110,
-            &mut rng
-        );
-        valid_evaluate!(
-            "Division",
-            Expression::Division(
-                Box::new(Expression::Constant(10)),
-                Box::new(Expression::Constant(11))
-            ),
-            0,
-            &mut rng
-        );
-        valid_evaluate!(
-            "Multiple Levels",
-            Expression::Addition(
-                Box::new(Expression::Multiplication(
-                    Box::new(Expression::Constant(10)),
-                    Box::new(Expression::Constant(11))
-                )),
-                Box::new(Expression::Multiplication(
-                    Box::new(Expression::Constant(10)),
-                    Box::new(Expression::Constant(11))
-                ))
-            ),
-            220,
-            &mut rng
-        );
-    }
-
-    #[test]
-    fn dice_pool() {
-        let seed: [u8; 32] = [1; 32];
-        let mut rng: StdRng = SeedableRng::from_seed(seed);
-        valid_evaluate!("d20", Expression::Pool(DicePool::new(1, 20)), 3, &mut rng);
-        valid_evaluate!("3d20", Expression::Pool(DicePool::new(3, 20)), 31, &mut rng);
-        valid_evaluate!(
-            "3d20#",
-            Expression::Pool(DicePool {
-                consolidator: PoolConsolidator::Count(None),
-                modifiers: vec![],
-                count: 3,
-                sides: 20
-            }),
-            0,
-            &mut rng
-        );
-        valid_evaluate!(
-            "3d20#<20",
-            Expression::Pool(DicePool {
-                consolidator: PoolConsolidator::Count(Some(vec![Conditional::LessThan(
-                    Expression::Constant(20)
-                )])),
-                modifiers: vec![],
-                count: 3,
-                sides: 20
-            }),
-            3,
-            &mut rng
-        );
+impl<'a> fmt::Debug for Expression {
+    fn fmt(&self, format: &mut fmt::Formatter) -> fmt::Result {
+        match *self.expression {
+            ExpressionType::Constant(ref val) => write!(format, "{}", val),
+            ExpressionType::Pool(ref dice) => write!(format, "{:?}", dice),
+            ExpressionType::Multiplication(ref left, ref right) => {
+                write!(format, "({:?} * {:?})", left, right)
+            }
+            ExpressionType::Division(ref left, ref right) => {
+                write!(format, "({:?} / {:?})", left, right)
+            }
+            ExpressionType::Addition(ref left, ref right) => {
+                write!(format, "({:?} + {:?})", left, right)
+            }
+            ExpressionType::Subtraction(ref left, ref right) => {
+                write!(format, "({:?} - {:?})", left, right)
+            }
+        }
     }
 }

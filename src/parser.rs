@@ -6,6 +6,7 @@ use nom::{
     multi::{many0, many1, separated_nonempty_list},
     sequence::{delimited, pair, preceded, separated_pair, tuple},
     IResult,
+    error::ErrorKind
 };
 
 use crate::ast::*;
@@ -59,34 +60,34 @@ fn parse_constant(input: &str) -> IResult<&str, i32> {
 
 // Parses the parenthesis with an Expression in the middle
 fn parse_parens(input: &str) -> IResult<&str, Expression> {
-    delimited(c('('), parse_expression, c(')'))(input)
+    delimited(c('('), cut(parse_expression), cut(c(')')))(input)
 }
 
 fn parse_conditional(input: &str) -> IResult<&str, Conditional> {
     alt((
         map(
-            preceded(tag("<="), parse_limited_factor),
-            Conditional::LessThanOrEqualTo,
+            preceded(tag("<="), cut(parse_limited_factor)),
+            |f| Conditional::new(ConditionalType::LessThanOrEqualTo(f)),
         ),
         map(
-            preceded(tag(">="), parse_limited_factor),
-            Conditional::GreaterThanOrEqualTo,
+            preceded(tag(">="), cut(parse_limited_factor)),
+            |f| Conditional::new(ConditionalType::GreaterThanOrEqualTo(f)),
         ),
         map(
-            preceded(tag("!="), parse_limited_factor),
-            Conditional::NotEqualTo,
+            preceded(tag("!="), cut(parse_limited_factor)),
+            |f| Conditional::new(ConditionalType::NotEqualTo(f)),
         ),
         map(
-            preceded(c('>'), parse_limited_factor),
-            Conditional::GreaterThan,
+            preceded(c('>'), cut(parse_limited_factor)),
+            |f| Conditional::new(ConditionalType::GreaterThan(f)),
         ),
         map(
-            preceded(c('<'), parse_limited_factor),
-            Conditional::LessThan,
+            preceded(c('<'), cut(parse_limited_factor)),
+            |f| Conditional::new(ConditionalType::LessThan(f)),
         ),
         map(
             preceded(opt(c('=')), parse_limited_factor),
-            Conditional::EqualTo,
+            |f| Conditional::new(ConditionalType::EqualTo(f)),
         ),
     ))(input)
 }
@@ -113,20 +114,20 @@ fn parse_pool_modifier(input: &str) -> IResult<&str, PoolModifier> {
             PoolModifier::DropLowest,
         ),
         map(
-            preceded(alt((c('D'), c('d'))), many1(parse_conditional)),
+            preceded(alt((c('D'), c('d'))), cut(many1(parse_conditional))),
             PoolModifier::Drop,
         ),
         map(
-            preceded(alt((c('C'), c('c'))), many1(parse_conditional)),
+            preceded(alt((c('C'), c('c'))), cut(many1(parse_conditional))),
             PoolModifier::CapClamp,
         ),
         map(
             preceded(
                 alt((c('V'), c('v'))),
-                separated_nonempty_list(
+                cut(separated_nonempty_list(
                     c(','),
                     separated_pair(parse_conditional, c('='), parse_limited_factor),
-                ),
+                )),
             ),
             PoolModifier::ValueReplace,
         ),
@@ -135,10 +136,10 @@ fn parse_pool_modifier(input: &str) -> IResult<&str, PoolModifier> {
             preceded(
                 alt((c('R'), c('r'))),
                 pair(
-                    alt((
-                        delimited(c('{'), parse_many_conditionals, c('}')),
+                    cut(alt((
+                        delimited(c('{'), parse_many_conditionals, cut(c('}'))),
                         parse_many_conditionals,
-                    )),
+                    ))),
                     opt(parse_limited_factor),
                 ),
             ),
@@ -146,7 +147,7 @@ fn parse_pool_modifier(input: &str) -> IResult<&str, PoolModifier> {
         ),
         map(
             pair(
-                delimited(tag("!{"), opt(parse_many_conditionals), c('}')),
+                delimited(tag("!{"), opt(parse_many_conditionals), cut(c('}'))),
                 opt(parse_limited_factor),
             ),
             |(c, e)| PoolModifier::Explode(c, e),
@@ -154,8 +155,8 @@ fn parse_pool_modifier(input: &str) -> IResult<&str, PoolModifier> {
         map(
             delimited(
                 tag("!~"),
-                separated_nonempty_list(c(','), parse_limited_factor),
-                c('~'),
+                cut(separated_nonempty_list(c(','), parse_limited_factor)),
+                cut(c('~')),
             ),
             PoolModifier::PatternExplode,
         ),
@@ -184,21 +185,30 @@ fn parse_dice_pool(input: &str) -> IResult<&str, Expression> {
         opt(parse_pool_consolidator),
     ))(input)?;
     let count = match (dice.0).0 {
-        Some(i) => i,
+        Some(i) => {
+            if i < 1 {
+                return Err(nom::Err::Failure(("number of dice must be greater than 0 if specified", ErrorKind::Verify)));
+            }
+            i
+        },
         None => 1,
     };
+    if (dice.0).1 < 2 {
+        return Err(nom::Err::Failure(("number of sides must be greater than 1", ErrorKind::Verify)));
+    }
     let mut pool = DicePool::new(count, (dice.0).1);
     pool.append_modifiers(&mut dice.1);
     if let Some(c) = dice.2 {
         pool.consolidator = c;
     }
-    Ok((i, Expression::Pool(pool)))
+    let e = Expression::new(ExpressionType::Pool(pool));
+    Ok((i, e))
 }
 
 // Don't allow DicePool as it should be in parens and no spacing around it
 // Also only allow positive digits if no parens as it doesn't make logical sense to allow negatives here
 fn parse_limited_factor(input: &str) -> IResult<&str, Expression> {
-    alt((map(parse_digits, Expression::Constant), parse_parens))(input)
+    alt((map(parse_digits, |d| Expression::new(ExpressionType::Constant(d))), parse_parens))(input)
 }
 
 // Any Expression parser in here should account for space on either side of it
@@ -207,7 +217,7 @@ fn parse_factor(input: &str) -> IResult<&str, Expression> {
         delimited(multispace0, parse_dice_pool, multispace0),
         map(
             delimited(multispace0, parse_constant, multispace0),
-            Expression::Constant,
+            |d| Expression::new(ExpressionType::Constant(d)),
         ),
         delimited(multispace0, parse_parens, multispace0),
     ))(input)
@@ -215,10 +225,10 @@ fn parse_factor(input: &str) -> IResult<&str, Expression> {
 
 fn fold(acc: Expression, (op, val): (Operation, Expression)) -> Expression {
     match op {
-        Operation::Multiplication => Expression::Multiplication(Box::new(acc), Box::new(val)),
-        Operation::Division => Expression::Division(Box::new(acc), Box::new(val)),
-        Operation::Addition => Expression::Addition(Box::new(acc), Box::new(val)),
-        Operation::Subtraction => Expression::Subtraction(Box::new(acc), Box::new(val)),
+        Operation::Multiplication => Expression::new(ExpressionType::Multiplication(acc, val)),
+        Operation::Division => Expression::new(ExpressionType::Division(acc, val)),
+        Operation::Addition => Expression::new(ExpressionType::Addition(acc, val)),
+        Operation::Subtraction => Expression::new(ExpressionType::Subtraction(acc, val)),
     }
 }
 
