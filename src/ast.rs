@@ -29,7 +29,7 @@ impl Conditional {
         }
     }
 
-    fn evaluate_many<E: Rng>(conds: &mut Vec<Conditional>, rng: &mut E){
+    fn evaluate_many<E: Rng>(conds: &mut Vec<Conditional>, rng: &mut E) {
         for cond in conds.iter_mut() {
             cond.evaluate(rng);
         }
@@ -38,7 +38,7 @@ impl Conditional {
     fn compare(&self, left: i32) -> bool {
         let e = match &self.evaluated {
             Some(e) => e,
-            None => unreachable!("Conditional expression has not been simplified yet")
+            None => unreachable!("Conditional expression has not been simplified yet"),
         };
         e.compare(left)
     }
@@ -46,7 +46,7 @@ impl Conditional {
     fn compare_many(conds: &Vec<Conditional>, left: i32) -> bool {
         for cond in conds.iter() {
             if cond.compare(left) {
-                return true
+                return true;
             }
         }
         false
@@ -54,53 +54,53 @@ impl Conditional {
 }
 
 impl Evaluatable for Conditional {
-    fn evaluate<E: Rng>(&mut self, rng: &mut E){
+    fn evaluate<E: Rng>(&mut self, rng: &mut E) {
         match self.conditional {
             ConditionalType::LessThan(ref mut e) => {
                 e.evaluate(rng);
-                let r = match e.evaluated{
+                let r = match e.evaluated {
                     Some(r) => r,
-                    None => unreachable!("less than expression was not evaluated")
+                    None => unreachable!("less than expression was not evaluated"),
                 };
                 self.evaluated = Some(SimpleConditionalType::LessThan(r));
             }
             ConditionalType::LessThanOrEqualTo(ref mut e) => {
                 e.evaluate(rng);
-                let r = match e.evaluated{
+                let r = match e.evaluated {
                     Some(r) => r,
-                    None => unreachable!("less than or equal to expression was not evaluated")
+                    None => unreachable!("less than or equal to expression was not evaluated"),
                 };
                 self.evaluated = Some(SimpleConditionalType::LessThanOrEqualTo(r));
             }
             ConditionalType::GreaterThan(ref mut e) => {
                 e.evaluate(rng);
-                let r = match e.evaluated{
+                let r = match e.evaluated {
                     Some(r) => r,
-                    None => unreachable!("greater than expression was not evaluated")
+                    None => unreachable!("greater than expression was not evaluated"),
                 };
                 self.evaluated = Some(SimpleConditionalType::GreaterThan(r));
             }
             ConditionalType::GreaterThanOrEqualTo(ref mut e) => {
                 e.evaluate(rng);
-                let r = match e.evaluated{
+                let r = match e.evaluated {
                     Some(r) => r,
-                    None => unreachable!("greater than or equal to expression was not evaluated")
+                    None => unreachable!("greater than or equal to expression was not evaluated"),
                 };
                 self.evaluated = Some(SimpleConditionalType::GreaterThanOrEqualTo(r));
             }
             ConditionalType::EqualTo(ref mut e) => {
                 e.evaluate(rng);
-                let r = match e.evaluated{
+                let r = match e.evaluated {
                     Some(r) => r,
-                    None => unreachable!("equal to expression was not evaluated")
+                    None => unreachable!("equal to expression was not evaluated"),
                 };
                 self.evaluated = Some(SimpleConditionalType::EqualTo(r));
             }
             ConditionalType::NotEqualTo(ref mut e) => {
                 e.evaluate(rng);
-                let r = match e.evaluated{
+                let r = match e.evaluated {
                     Some(r) => r,
-                    None => unreachable!("not equal to expression was no evaluated")
+                    None => unreachable!("not equal to expression was no evaluated"),
                 };
                 self.evaluated = Some(SimpleConditionalType::NotEqualTo(r));
             }
@@ -139,7 +139,7 @@ impl SimpleConditionalType {
             SimpleConditionalType::GreaterThan(right) => left > right,
             SimpleConditionalType::GreaterThanOrEqualTo(right) => left >= right,
             SimpleConditionalType::EqualTo(right) => left == right,
-            SimpleConditionalType::NotEqualTo(right) => left != right
+            SimpleConditionalType::NotEqualTo(right) => left != right,
         }
     }
 }
@@ -178,21 +178,19 @@ impl PoolConsolidator {
                     }
                     count
                 }
-            }
+            },
         }
     }
 }
 
 impl Evaluatable for PoolConsolidator {
-    fn evaluate<E: Rng>(&mut self, rng: &mut E){
+    fn evaluate<E: Rng>(&mut self, rng: &mut E) {
         match self {
-            PoolConsolidator::Addition => {},
-            PoolConsolidator::Count(conds) => {
-                match conds {
-                    Some(cs) => return Conditional::evaluate_many(cs, rng),
-                    None => return
-                }
-            }
+            PoolConsolidator::Addition => {}
+            PoolConsolidator::Count(conds) => match conds {
+                Some(cs) => return Conditional::evaluate_many(cs, rng),
+                None => return,
+            },
         }
     }
 }
@@ -266,7 +264,7 @@ pub struct DicePool {
     pub modifiers: Vec<PoolModifier>,
     pub consolidator: PoolConsolidator,
     pub evaluated: Option<i32>,
-    pub original_rolls: Option<Vec<u32>>
+    pub original_rolls: Option<Vec<u32>>,
 }
 
 impl DicePool {
@@ -301,7 +299,10 @@ impl Evaluatable for DicePool {
         }
         self.original_rolls = Some(rolled);
         self.consolidator.evaluate(rng);
-        self.evaluated = Some(self.consolidator.consolidate(self.sides, self.original_rolls.as_ref().unwrap()));
+        self.evaluated = Some(
+            self.consolidator
+                .consolidate(self.sides, self.original_rolls.as_ref().unwrap()),
+        );
     }
 }
 

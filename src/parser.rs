@@ -3,10 +3,10 @@ use nom::{
     bytes::complete::tag,
     character::complete::{char as c, digit1, multispace0},
     combinator::{cut, map, map_res, opt},
+    error::ErrorKind,
     multi::{many0, many1, separated_nonempty_list},
     sequence::{delimited, pair, preceded, separated_pair, tuple},
     IResult,
-    error::ErrorKind
 };
 
 use crate::ast::*;
@@ -65,30 +65,24 @@ fn parse_parens(input: &str) -> IResult<&str, Expression> {
 
 fn parse_conditional(input: &str) -> IResult<&str, Conditional> {
     alt((
-        map(
-            preceded(tag("<="), cut(parse_limited_factor)),
-            |f| Conditional::new(ConditionalType::LessThanOrEqualTo(f)),
-        ),
-        map(
-            preceded(tag(">="), cut(parse_limited_factor)),
-            |f| Conditional::new(ConditionalType::GreaterThanOrEqualTo(f)),
-        ),
-        map(
-            preceded(tag("!="), cut(parse_limited_factor)),
-            |f| Conditional::new(ConditionalType::NotEqualTo(f)),
-        ),
-        map(
-            preceded(c('>'), cut(parse_limited_factor)),
-            |f| Conditional::new(ConditionalType::GreaterThan(f)),
-        ),
-        map(
-            preceded(c('<'), cut(parse_limited_factor)),
-            |f| Conditional::new(ConditionalType::LessThan(f)),
-        ),
-        map(
-            preceded(opt(c('=')), parse_limited_factor),
-            |f| Conditional::new(ConditionalType::EqualTo(f)),
-        ),
+        map(preceded(tag("<="), cut(parse_limited_factor)), |f| {
+            Conditional::new(ConditionalType::LessThanOrEqualTo(f))
+        }),
+        map(preceded(tag(">="), cut(parse_limited_factor)), |f| {
+            Conditional::new(ConditionalType::GreaterThanOrEqualTo(f))
+        }),
+        map(preceded(tag("!="), cut(parse_limited_factor)), |f| {
+            Conditional::new(ConditionalType::NotEqualTo(f))
+        }),
+        map(preceded(c('>'), cut(parse_limited_factor)), |f| {
+            Conditional::new(ConditionalType::GreaterThan(f))
+        }),
+        map(preceded(c('<'), cut(parse_limited_factor)), |f| {
+            Conditional::new(ConditionalType::LessThan(f))
+        }),
+        map(preceded(opt(c('=')), parse_limited_factor), |f| {
+            Conditional::new(ConditionalType::EqualTo(f))
+        }),
     ))(input)
 }
 
@@ -187,14 +181,20 @@ fn parse_dice_pool(input: &str) -> IResult<&str, Expression> {
     let count = match (dice.0).0 {
         Some(i) => {
             if i < 1 {
-                return Err(nom::Err::Failure(("number of dice must be greater than 0 if specified", ErrorKind::Verify)));
+                return Err(nom::Err::Failure((
+                    "number of dice must be greater than 0 if specified",
+                    ErrorKind::Verify,
+                )));
             }
             i
-        },
+        }
         None => 1,
     };
     if (dice.0).1 < 2 {
-        return Err(nom::Err::Failure(("number of sides must be greater than 1", ErrorKind::Verify)));
+        return Err(nom::Err::Failure((
+            "number of sides must be greater than 1",
+            ErrorKind::Verify,
+        )));
     }
     let mut pool = DicePool::new(count, (dice.0).1);
     pool.append_modifiers(&mut dice.1);
@@ -208,17 +208,21 @@ fn parse_dice_pool(input: &str) -> IResult<&str, Expression> {
 // Don't allow DicePool as it should be in parens and no spacing around it
 // Also only allow positive digits if no parens as it doesn't make logical sense to allow negatives here
 fn parse_limited_factor(input: &str) -> IResult<&str, Expression> {
-    alt((map(parse_digits, |d| Expression::new(ExpressionType::Constant(d))), parse_parens))(input)
+    alt((
+        map(parse_digits, |d| {
+            Expression::new(ExpressionType::Constant(d))
+        }),
+        parse_parens,
+    ))(input)
 }
 
 // Any Expression parser in here should account for space on either side of it
 fn parse_factor(input: &str) -> IResult<&str, Expression> {
     alt((
         delimited(multispace0, parse_dice_pool, multispace0),
-        map(
-            delimited(multispace0, parse_constant, multispace0),
-            |d| Expression::new(ExpressionType::Constant(d)),
-        ),
+        map(delimited(multispace0, parse_constant, multispace0), |d| {
+            Expression::new(ExpressionType::Constant(d))
+        }),
         delimited(multispace0, parse_parens, multispace0),
     ))(input)
 }
@@ -393,22 +397,22 @@ mod tests {
             "(5d20[]+)"
         );
         exhaust_valid!(
-            "dice with arithmatic",
+            "dice with arithmetic",
             parse_expression("2d10 + 7"),
             "((2d10[]+) + 7)"
         );
         exhaust_valid!(
-            "dice with arithmatic",
+            "dice with arithmetic",
             parse_expression("2d10D<2 + 7"),
             "((2d10[(D[<2])]+) + 7)"
         );
         exhaust_valid!(
-            "dice with arithmatic in condtional",
+            "dice with arithmetic in conditional",
             parse_expression("2d10D<(2 + 7)"),
             "(2d10[(D[<(2 + 7)])]+)"
         );
         exhaust_valid!(
-            "dice with dice in condtional",
+            "dice with dice in conditional",
             parse_expression("2d10D<(2d10)"),
             "(2d10[(D[<(2d10[]+)])]+)"
         );
